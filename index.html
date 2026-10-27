@@ -28,7 +28,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--pos);flex:none}
 .dot.busy{background:var(--warn)}
 .dot.err{background:var(--neg)}
-.main{min-width:0;padding-inline:clamp(16px,3.2vw,40px);padding-block:26px 60px}
+.main{min-width:0;padding-inline:40px;padding-block:26px 60px}
 .wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
 .tabbar{display:none}
 .btn:hover{border-color:var(--ink-3)}
@@ -670,7 +670,6 @@ button.cal-li:not(:disabled):hover{background:var(--surface-2)}
 /* amounts only on hover */
 .cal-amts{margin-top:auto;display:flex;flex-direction:column;gap:1px;max-width:100%;opacity:0;transition:opacity .15s}
 .cal-d:hover .cal-amts,.cal-d:focus-visible .cal-amts{opacity:1}
-.cal-card{padding:24px 26px}
 .cal-card .cal-h{margin-bottom:16px}
 .cal-card .cal-hint{margin-top:14px}
 .cal-card .cal-grid{gap:8px;grid-auto-rows:auto}
@@ -719,7 +718,7 @@ button.pill,.tablewrap .btn.sm{min-height:24px;min-width:24px}
 .inc-r{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none;text-align:right}
 .inc-r .amt{font-variant-numeric:tabular-nums;font-weight:600}
 .inc-st{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
-.inc-tools{gap:6px;flex-wrap:wrap;margin:-4px 0 4px}
+.inc-tools{gap:6px;flex-wrap:wrap;margin:0}
 .inc-p .card-h h2 .tsub{display:inline}
 
 /* ===== one page layout for every page (27-10-2026) =====
@@ -776,6 +775,20 @@ button.tag:focus-visible{outline:2px solid var(--gb);outline-offset:2px}
 }
 /* Overzicht: the icon of "Uitgegeven" in a soft red, an expense at a glance */
 .kpi.k2 .ict{background:color-mix(in srgb,var(--sys-red) 12%,var(--surface)) !important;color:color-mix(in srgb,var(--sys-red) 72%,var(--ink)) !important}
+
+/* the same width on every page: always keep room for the scrollbar, also on short pages,
+   so the menu, the gap next to it and the content never move when you switch pages */
+html{scrollbar-gutter:stable}
+@supports not (scrollbar-gutter:stable){html{overflow-y:scroll}}
+/* the same measures inside every card: a card title row is always 28px high, and tables start and end
+   exactly where lists do (lines from the card edge, text 2px in), so nothing shifts between pages */
+.card > .card-h{min-height:28px;align-items:center}
+.tablewrap{margin-inline:0}
+.tablewrap :is(td,th):first-child{padding-left:2px}
+.tablewrap :is(td,th):last-child{padding-right:2px}
+/* whole pixels for the side margins (no fractions that round differently per page) */
+@media (max-width:1239px){.main{padding-inline:32px}}
+@media (max-width:760px){.main{padding-inline:16px}}
 
 </style>
 <div class="shell">
@@ -2335,7 +2348,7 @@ VIEWS.vastelasten = () => {
   return head('Vaste lasten', (btn('Controleren', 'checkSync')) + btn(icon('plus') + 'Vaste last', 'newFixed', '', 'primary'),
     periodNav(P, 'fprev', 'fnext', periodLabel(P), 'maand')) +
     topDuo(topCard({ ic: 'vastelasten', label: 'Per maand', amount: eur(perMonth), hint: 'Inclusief jaarabonnementen per maand' }),
-      topCard({ ic: 'wallet', label: 'Betaald van salaris ' + fmtShort(P.start), amount: eur(paidAmt), more: `<span class="bar hz-bar"><i style="width:${dueAmt ? Math.min(100, paidAmt / dueAmt * 100).toFixed(1) : 0}%"></i></span>`, hint: `van ${eur(dueAmt)} · ${dueRows2.filter(x => x.paid).length} van ${dueRows2.length} posten` })) + (`<p class="small muted" style="margin:-4px 2px 12px">Van het salaris van ${fmtLong(P.start)} betaal je alles wat daarna wordt afgeschreven, tot het volgende salaris op ${fmtLong(addDays(P.end, 1))}. Alleen betalingen in deze periode zetten een post op Betaald.</p>`) +
+      topCard({ ic: 'wallet', label: 'Betaald van salaris ' + fmtShort(P.start), amount: eur(paidAmt), more: `<span class="bar hz-bar"><i style="width:${dueAmt ? Math.min(100, paidAmt / dueAmt * 100).toFixed(1) : 0}%"></i></span>`, hint: `van ${eur(dueAmt)} · ${dueRows2.filter(x => x.paid).length} van ${dueRows2.length} posten` })) + (`<p class="small muted" style="margin:0">Van het salaris van ${fmtLong(P.start)} betaal je alles wat daarna wordt afgeschreven, tot het volgende salaris op ${fmtLong(addDays(P.end, 1))}. Alleen betalingen in deze periode zetten een post op Betaald.</p>`) +
     (fxDupCard()) + ((group('maand', 'Maandlasten', 'Per maand') + group('abonnement', 'Abonnementen', 'Per maand') + group('aflossen', 'Aflossen', 'Per maand') + group('sparen', 'Sparen (vaste inleg)', 'Per maand') + group('beleggen', 'Beleggen', 'Per maand') + (fxPotsCard()) + group('kwartaal', 'Elke 3 maanden', 'Per keer') + group('halfjaar', 'Elk half jaar', 'Per keer') + group('jaar', 'Eén keer per jaar', 'Per jaar'))) +
     (all('fixed').length ? '' : `<div class="card">${emptyState('Nog geen vaste lasten', 'Voeg je huur, verzekeringen en abonnementen toe.')}</div>`);
 };
@@ -4924,8 +4937,8 @@ function incomeOverview() {
   const next = [periodShift(cur, 1)];
   return `<div class="row inc-tools"><button type="button" class="btn sm ghost" data-act="editSalarySettings">Salaris instellen</button><button type="button" class="btn sm ghost" data-act="mortgageEdit">Hypotheekrente ${mortgageCfg() ? 'wijzigen' : 'instellen'}</button><button type="button" class="btn sm ghost" data-act="salInfo">Salaris per jaar</button></div>`
     + incPeriodCard(cur, 'nu') + next.map(x => incPeriodCard(x, 'komt nog')).join('')
-    + `<h3 class="xh" style="margin:18px 2px 6px">Eerdere periodes</h3>` + prev.map(x => incPeriodCard(x)).join('')
-    + `<div style="text-align:center;margin:4px 0 14px"><button type="button" class="btn" data-act="incMore">Meer tonen</button></div>`
+    + `<h3 class="xh" style="margin:0 0 -8px">Eerdere periodes</h3>` + prev.map(x => incPeriodCard(x)).join('')
+    + `<div style="text-align:center"><button type="button" class="btn" data-act="incMore">Meer tonen</button></div>`
     + (repayCard());
 }
 ACT.incMore = () => { UI.incPrev = (UI.incPrev || 3) + 3; render(); };
