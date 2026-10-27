@@ -797,6 +797,13 @@ html{scrollbar-gutter:stable}
 .cao tr.cao-tot td{border-bottom:0;border-top:2px solid var(--line)}
 /* phone: a long line under a status or amount (e.g. "2× deze periode: …") wraps instead of pushing the table wider than the screen */
 @media (max-width:760px){.tablewrap td.num .tsub{white-space:normal;min-width:0;max-width:112px;margin-left:auto}.tablewrap td.num :is(.pill,button.pill){white-space:normal;text-align:center;line-height:1.25;max-width:96px}}
+.cao .cao-pct{border:1px dashed var(--line);background:none;color:var(--ink-3);cursor:pointer;font:inherit;font-size:.8rem;padding:3px 9px;border-radius:99px}
+.cao .cao-pct.on{border:0;background:color-mix(in srgb,var(--sys-green) 13%,var(--surface));color:color-mix(in srgb,var(--sys-green) 65%,var(--ink));font-weight:600}
+.cao .cao-pct + .cao-pct{margin-left:4px}
+.cao tr.cao-more td{text-align:center;border-bottom:0;padding-block:12px}
+.show-m{display:none}
+@media (max-width:760px){.show-m{display:block}span.show-m,b.show-m{display:inline}
+  .cao .tablewrap :is(td,th){padding-inline:4px}.cao .tablewrap :is(td,th):first-child{padding-left:2px}.cao .tablewrap :is(td,th):last-child{padding-right:2px}.cao .cao-pct{padding:3px 7px}.cao .tablewrap td.num .tsub{max-width:96px}.cao .tablewrap table{font-size:.8rem}.cao .tablewrap td.num .tsub{-webkit-hyphens:auto;hyphens:auto;overflow-wrap:anywhere}}
 
 </style>
 <div class="shell">
@@ -2852,31 +2859,41 @@ function caoYear(c, y) {
 }
 const caoMonthTxt = x => cap(MONTHS[(+x.month || 1) - 1]) + (x.once ? ' ' + x.once : ', elk jaar');
 function caoCard() {
-  const c = caoCfg(), y = UI.caoYear || +today().slice(0, 4), rows = caoYear(c, y), totSal = sum(rows, r => r.sal), totEx = sum(rows, r => sum(r.ex, e => e.v));
+  const c = caoCfg();
   const raises = (c.raises || []).slice().sort((a, b) => a.from.localeCompare(b.from));
   const nowMk = monthKey(today());
   const raiseList = raises.length ? `<div class="list">${raises.map(r => `<button type="button" class="li" data-act="caoRaise" data-id="${E(r.id)}"><span class="grow"><b>+${nr(+r.pct, 2)}%</b><span class="tsub">vanaf ${monthLabel(r.from).toLowerCase()}${r.note ? ' · ' + E(r.note) : ''}${r.from <= c.baseFrom ? ' · zit al in je salaris' : ''}</span></span><span class="num">${eur(caoSalary(c, r.from))}</span></button>`).join('')}</div>` : '<p class="small muted">Nog geen verhogingen.</p>';
   const exList = (c.extras || []).length ? `<div class="list">${c.extras.map(x => `<button type="button" class="li" data-act="caoExtraEdit" data-id="${E(x.id)}"><span class="grow"><b>${E(x.name)}</b><span class="tsub">${x.kind === 'pct' ? nr(+x.value, 2) + '% van het salaris van 12 maanden' : eur(+x.value) + (x.rato ? ' (naar rato van je deeltijd)' : '')} · ${caoMonthTxt(x)}</span></span></button>`).join('')}</div>` : '<p class="small muted">Nog geen extra uitkeringen.</p>';
-  const table = `<div class="tablewrap"><table><thead><tr><th>Maand</th><th class="num">Salaris</th><th class="num">Extra</th><th class="num">Totaal bruto</th></tr></thead><tbody>${rows.map(r => `<tr${r.mk === nowMk ? ' class="cao-now"' : ''}><td><b>${cap(MONTHS[+r.mk.slice(5) - 1])}</b>${r.raise.length ? `<div class="tsub">+${r.raise.map(x => nr(+x.pct, 2) + '%').join(' +')} verhoging</div>` : ''}</td><td class="num">${r.sal ? eur(r.sal) : '—'}</td><td class="num">${r.ex.length ? eur(sum(r.ex, e => e.v)) + `<div class="tsub">${r.ex.map(e => E(e.x.name)).join(', ')}</div>` : ''}</td><td class="num"><b>${r.tot ? eur(r.tot) : '—'}</b></td></tr>`).join('')}
-    <tr class="cao-tot"><td><b>Totaal ${y}</b></td><td class="num">${eur(totSal)}</td><td class="num">${eur(totEx)}</td><td class="num"><b>${eur(totSal + totEx)}</b></td></tr></tbody></table></div>`;
+  // all months from September 2026 (or January of this year) up to December next year; a few shown, the rest folds open
+  const ty = +today().slice(0, 4), from = ty === 2026 ? '2026-09' : `${ty}-01`, to = `${ty + 1}-12`, months = [];
+  for (let mk = from; mk <= to; mk = addMonths(mk, 1)) months.push(mk);
+  const yr = {}; const yRows = y => (yr[y] ||= caoYear(c, y)); const rowOf = mk => yRows(+mk.slice(0, 4))[+mk.slice(5) - 1];
+  const start = Math.max(0, months.indexOf(nowMk)), shown = UI.caoAll ? months : months.slice(start, start + 4);
+  const row = mk => { const r = rowOf(mk), rs = (c.raises || []).filter(x => x.from === mk);
+    const pctBtn = rs.length ? rs.map(x => `<button type="button" class="pill cao-pct on" data-act="caoRaise" data-id="${E(x.id)}" title="Verhoging wijzigen">+${nr(+x.pct, 2)}%</button>`).join('') : `<button type="button" class="pill cao-pct" data-act="caoRaise" data-mk="${mk}" title="Verhoging vanaf deze maand">+ %</button>`;
+    return `<tr${mk === nowMk ? ' class="cao-now"' : ''}><td><b class="hide-m">${cap(MONTHS[+mk.slice(5) - 1])} ${mk.slice(0, 4)}</b><b class="show-m">${cap(MONTHS[+mk.slice(5) - 1].slice(0, 3))} ’${mk.slice(2, 4)}</b>${mk === nowMk ? '<div class="tsub">nu</div>' : ''}</td><td class="num">${pctBtn}</td><td class="num">${r.sal ? eur(r.sal) : '—'}</td><td class="num hide-m">${r.ex.length ? eur(sum(r.ex, e => e.v)) + `<div class="tsub">${r.ex.map(e => E(e.x.name)).join(', ')}</div>` : ''}</td><td class="num"><b>${r.tot ? eur(r.tot) : '—'}</b>${r.ex.length ? `<div class="tsub show-m">incl. ${r.ex.map(e => E(e.x.name).toLowerCase()).join(', ')}</div>` : ''}</td></tr>`; };
+  const ys = [...new Set(months.map(mk => +mk.slice(0, 4)))].map(y => { const rr = yRows(y), sl = sum(rr, r => r.sal), ex = sum(rr, r => sum(r.ex, e => e.v)); return `<tr class="cao-tot"><td><b>${y}</b><div class="tsub">hele jaar</div></td><td></td><td class="num">${eur(sl)}</td><td class="num hide-m">${eur(ex)}</td><td class="num"><b>${eur(sl + ex)}</b></td></tr>`; }).join('');
+  const table = `<div class="tablewrap"><table><thead><tr><th>Maand</th><th class="num"><span class="hide-m">Verhoging</span><span class="show-m">%</span></th><th class="num">Salaris</th><th class="num hide-m">Extra</th><th class="num">Totaal<span class="hide-m"> bruto</span></th></tr></thead><tbody>${shown.map(row).join('')}
+    <tr class="cao-more"><td colspan="5"><button type="button" class="link" data-act="caoAll">${UI.caoAll ? 'Minder maanden tonen' : `Alle maanden tonen (${MONTHS[+from.slice(5) - 1]} ${from.slice(0, 4)} – december ${to.slice(0, 4)})`}</button></td></tr>
+    ${ys}</tbody></table></div>`;
   return `<div class="card cao"><div class="card-h"><h2>Salaris volgens de cao</h2><button type="button" class="btn sm" data-act="caoBase">Salaris instellen</button></div>
     ${+c.base > 0 ? `<p class="small muted" style="margin:0 0 14px">Bruto ${eur(+c.base)} per maand in ${monthLabel(c.baseFrom).toLowerCase()}${+c.parttime !== 100 ? ` · deeltijd ${nr(+c.parttime)}%` : ''}. Elke verhoging hieronder komt daar bovenop. Alles is bruto.</p>` : `<p class="small muted" style="margin:0 0 14px">Vul eerst je bruto maandsalaris in bij <i>Salaris instellen</i>.</p>`}
     <h3 class="xh">Verhogingen <span><button type="button" class="link" data-act="caoRaise">+ Verhoging</button></span></h3>${raiseList}
     <h3 class="xh" style="margin-top:14px">Extra uitkeringen <span><button type="button" class="link" data-act="caoExtraEdit">+ Uitkering</button></span></h3>${exList}
-    <div class="cao-yh"><h3 class="xh" style="margin:0">Per maand</h3><div class="periodbar"><button type="button" class="iconbtn" data-act="caoY" data-d="-1" aria-label="Vorig jaar">${icon('left')}</button><span class="cur">${y}</span><button type="button" class="iconbtn" data-act="caoY" data-d="1" aria-label="Volgend jaar">${icon('right')}</button></div></div>
+    <div class="cao-yh"><h3 class="xh" style="margin:0">Per maand</h3></div>
     ${table}
     <p class="small muted" style="margin-top:10px">Bruto bedragen. Over een uitkering zoals de eindejaarsuitkering of vakantietoeslag gaat vaak meer belasting af dan over je gewone salaris (bijzonder tarief), dus netto krijg je daar naar verhouding minder van.</p></div>`;
 }
 const caoSave = (patch, label) => saveConfig({ cao: { ...caoCfg(), ...patch } }, label);
 const caoMonthFields = (mk, label) => `${F.select('m', label, String(+mk.slice(5, 7)), MONTHS.map((n, i) => [String(i + 1), cap(n)]))}${F.num('y', 'Jaar', +mk.slice(0, 4), { step: 1 })}`;
 const caoMk = v => { const y = Math.round(+v.y), m = Math.round(+v.m); if (!(y > 1999 && y < 2100) || !(m >= 1 && m <= 12)) throw new Error('Kies een geldige maand en een jaar.'); return `${y}-${String(m).padStart(2, '0')}`; };
-ACT.caoY = el => { UI.caoYear = (UI.caoYear || +today().slice(0, 4)) + +el.dataset.d; render(); };
+ACT.caoAll = () => { UI.caoAll = !UI.caoAll; render(); };
 ACT.caoBase = () => { const c = caoCfg();
   openSheet({ title: 'Salaris instellen', body: `<div class="grid2">${F.money('base', 'Bruto maandsalaris', c.base, { req: 1 })}${F.num('parttime', 'Deeltijd (%)', c.parttime ?? 100, { step: 1 })}${caoMonthFields(c.baseFrom, 'Dit salaris kreeg je in')}</div>
     <p class="small muted" style="margin-top:8px">Kies de maand van je loonstrook. Verhogingen tot en met die maand zitten al in dit bedrag; latere komen erbovenop. De deeltijd geldt alleen voor vaste bedragen die naar rato zijn, zoals de eenmalige uitkering.</p>`,
     onSubmit: v => { if (!(v.base > 0)) throw new Error('Vul je bruto maandsalaris in.'); const pt = v.parttime == null ? 100 : +v.parttime; if (!(pt > 0 && pt <= 100)) throw new Error('Vul een deeltijd tussen 1 en 100% in.');
       return caoSave({ base: r2(v.base), parttime: pt, baseFrom: caoMk(v) }, 'Salaris voor de cao-berekening'); } }); };
-ACT.caoRaise = el => { const c = caoCfg(), r = (c.raises || []).find(x => x.id === el.dataset.id), mk = r ? r.from : addMonths(monthKey(today()), 1);
+ACT.caoRaise = el => { const c = caoCfg(), r = (c.raises || []).find(x => x.id === el.dataset.id), mk = r ? r.from : el.dataset.mk || addMonths(monthKey(today()), 1);
   openSheet({ title: r ? 'Verhoging wijzigen' : 'Verhoging toevoegen', body: `<div class="grid2">${F.num('pct', 'Verhoging (%)', r ? r.pct : '', { req: 1 })}${F.text('note', 'Omschrijving (mag leeg)', r?.note || '')}${caoMonthFields(mk, 'Vanaf')}</div>`,
     extraFoot: r ? '<button type="button" class="btn danger left" data-act="caoRaiseDel">Verwijderen</button>' : '',
     actions: { caoRaiseDel: () => { closeSheet(); return caoSave({ raises: c.raises.filter(x => x.id !== r.id) }, 'Verhoging verwijderd'); } },
