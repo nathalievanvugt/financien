@@ -2824,10 +2824,11 @@ const CAO_DEFAULT = () => ({
   extras: [
     { id: 'x-eju', name: 'Eindejaarsuitkering', kind: 'pct', value: 8.33, month: 12, once: null },
     { id: 'x-vak', name: 'Vakantietoeslag', kind: 'pct', value: 8, month: 5, once: null },
-    { id: 'x-eenmalig', name: 'Eenmalige uitkering cao', kind: 'eur', value: 1700, month: 7, once: 2026, rato: true },
+    { id: 'x-eenmalig', name: 'Eenmalige uitkering cao', kind: 'eur', value: 1700, month: 11, once: 2026, rato: true },
   ],
 });
-const caoCfg = () => C().cao || CAO_DEFAULT();
+/* the one-off cao payment is paid in November (was set to July at first; changed unless Arjan set it himself) */
+const caoCfg = () => { const c = C().cao; if (!c) return CAO_DEFAULT(); return { ...c, extras: (c.extras || []).map(x => x.id === 'x-eenmalig' && !x.edited && +x.month === 7 ? { ...x, month: 11 } : x) }; };
 /* gross salary in month mk: the base, with every raise from after the base month up to and including mk */
 function caoSalary(c, mk) {
   if (!(+c.base > 0)) return 0;
@@ -2890,7 +2891,7 @@ ACT.caoExtraEdit = el => { const c = caoCfg(), x = (c.extras || []).find(e => e.
     extraFoot: x ? '<button type="button" class="btn danger left" data-act="caoExtraDel">Verwijderen</button>' : '',
     actions: { caoExtraDel: () => { closeSheet(); return caoSave({ extras: c.extras.filter(e => e.id !== x.id) }, 'Uitkering verwijderd'); } },
     onSubmit: v => { if (!isFinite(v.value) || !(v.value > 0)) throw new Error('Vul een percentage of bedrag in.'); const once = v.rep === 'once' ? Math.round(+v.y) : null; if (once != null && !(once > 1999 && once < 2100)) throw new Error('Vul een geldig jaar in.');
-      const n = { id: x ? x.id : uid('x'), name: v.name, kind: v.kind === 'eur' ? 'eur' : 'pct', value: +v.value, month: +v.m, once, rato: v.kind === 'eur' && !!v.rato };
+      const n = { id: x ? x.id : uid('x'), edited: true, name: v.name, kind: v.kind === 'eur' ? 'eur' : 'pct', value: +v.value, month: +v.m, once, rato: v.kind === 'eur' && !!v.rato };
       return caoSave({ extras: [...(c.extras || []).filter(e => e.id !== n.id), n] }, x ? 'Uitkering gewijzigd' : 'Uitkering toegevoegd'); } }); };
 
 /* ================= files and bank import ================= */
