@@ -30,7 +30,6 @@ button,input,select,textarea{font:inherit;color:inherit}
 .dot.err{background:var(--neg)}
 .main{min-width:0;padding-inline:clamp(16px,3.2vw,40px);padding-block:26px 60px}
 .wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
-.pagehead .actions{display:flex;gap:8px;flex-wrap:wrap}
 .tabbar{display:none}
 .btn:hover{border-color:var(--ink-3)}
 .btn.ghost{border-color:transparent;background:none;color:var(--ink-2)}
@@ -304,10 +303,7 @@ body,html{background:var(--bg)}
 .brand > svg{width:32px;height:32px}
 .navbtn[aria-current="page"]{color:var(--ink);background:var(--surface-2) !important;font-weight:600}
 .navbtn[aria-current="page"]::after{content:"";position:absolute;right:12px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--pg)}
-.pagehead{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start}
-.ph-t{display:flex;flex-direction:column;gap:2px}
 h1{line-height:1.2;font-size:1.55rem !important;font-weight:650 !important;letter-spacing:-.02em}
-.ph-sub{font-size:.88rem;color:var(--ink-2)}
 .ph-ic{display:inline-grid !important;place-items:center;flex:none;background:color-mix(in srgb,var(--pg) 14%,var(--surface)) !important;color:color-mix(in srgb,var(--pg) 85%,var(--ink)) !important;width:30px !important;height:30px !important;border-radius:9px}
 .periodbar{display:flex;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:3px;gap:2px}
 .periodbar .iconbtn{border:0;background:transparent;width:32px;height:32px;border-radius:9px}
@@ -568,15 +564,12 @@ body[data-page="setup"] .shell{grid-template-columns:minmax(0,1fr)}
   .tabbar svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7}
   .grid2,.grid3{grid-template-columns:minmax(0,1fr)}
   .hide-m{display:none !important}
-  .periodbar .cur{flex:1}
-  .periodbar{width:100%}
   dialog.sheet,dialog.sheet.wide{width:100vw;max-width:100vw;margin:auto 0 0;border-radius:18px 18px 0 0;max-height:92dvh}
   .sheet-in{max-height:92dvh}
   .sheet-f{padding-bottom:calc(16px + env(safe-area-inset-bottom,0px))}
   .toolbar input[type=search]{max-width:none;flex:1 1 100%}
   .txr{flex-direction:column;align-items:flex-end;gap:4px}
   .stat .hint{display:none}
-  .pagehead .actions{width:100%}
   .pv thead{display:none}
   .pv tbody tr{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"c d a" "n n n" "k k t";gap:6px 10px;padding:12px 0;border-bottom:1px solid var(--line)}
   .pv td{border:0;padding:0 !important;min-width:0 !important}
@@ -695,7 +688,6 @@ button.cal-li:not(:disabled):hover{background:var(--surface-2)}
 /* M7: small grey text readable (contrast 5:1 instead of 3.3:1); dark mode keeps its own value */
 button.pill,.tablewrap .btn.sm{min-height:24px;min-width:24px}
 /* stand-alone: the child's own money */
-.periodbar.sm .cur{font-size:.85rem;padding:0 6px}
 /* stand-alone: parent and child side by side, the same block */
 .hero-duo{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px}
 .hero-duo .hero-main{height:100%}
@@ -718,9 +710,6 @@ button.pill,.tablewrap .btn.sm{min-height:24px;min-width:24px}
 .cand-ok{font-size:.72rem;margin-right:6px;white-space:nowrap}
 
 /* stand-alone: month name above the period arrows */
-.pb-wrap{display:flex;flex-direction:column;align-items:stretch;gap:3px}
-.pb-month{text-align:center;font-weight:700;font-size:.95rem;line-height:1.2}
-@media (max-width:760px){.pb-wrap{width:100%}}
 /* stand-alone: Inkomsten per periode */
 .inc-list{display:flex;flex-direction:column}
 .inc-row{display:flex;align-items:center;gap:12px;padding:10px 2px;border-top:1px solid var(--line)}
@@ -732,6 +721,63 @@ button.pill,.tablewrap .btn.sm{min-height:24px;min-width:24px}
 .inc-st{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
 .inc-tools{gap:6px;flex-wrap:wrap;margin:-4px 0 4px}
 .inc-p .card-h h2 .tsub{display:inline}
+
+/* ===== one page layout for every page (27-10-2026) =====
+   The header always has the same height: title row + one line under it (empty on most pages).
+   Wide: title | period bar (centred) | buttons, all on one line.
+   Medium: title row, then the period bar on the left and the buttons on the right.
+   Phone: title row, period bar over the full width, buttons under it. */
+.pagehead{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);grid-template-areas:"t m a";column-gap:16px;row-gap:12px;align-items:start}
+.ph-t{grid-area:t;display:flex;flex-direction:column;gap:2px;min-width:0}
+.pagehead h1{height:40px;white-space:nowrap}
+.ph-sub{font-size:.88rem;color:var(--ink-2);line-height:18px;height:18px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:42px}
+.ph-mid{grid-area:m;display:flex;align-items:center;gap:8px;min-height:40px}
+.ph-mid:empty{min-height:0}
+.pagehead .actions{grid-area:a;display:flex;gap:8px;align-items:center;justify-content:flex-end;height:40px}
+.pagehead .actions .btn{height:36px;padding:0 14px;font-size:.88rem;font-weight:600;border-radius:10px;gap:7px;line-height:1}
+.pagehead .actions .btn svg{width:16px;height:16px}
+/* the period bar: month name on its left, always the same widths, so nothing moves */
+.pb-wrap{position:relative;display:flex;align-items:center;gap:10px}
+.pb-month{width:92px;flex:none;text-align:right;font-weight:700;font-size:.95rem;line-height:1.2;white-space:nowrap}
+.periodbar{display:flex;align-items:center;height:40px;box-sizing:border-box;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:3px;gap:2px}
+.periodbar .cur{width:176px;flex:none}
+.pb-extra{position:absolute;left:100%;top:50%;transform:translateY(-50%);margin-left:8px}
+@media (max-width:1239px){
+  .pagehead{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"t t" "m a"}
+  .ph-mid,.ph-mid:empty{min-height:40px}
+}
+@media (max-width:760px){
+  .pagehead{grid-template-columns:minmax(0,1fr);grid-template-areas:"t" "m" "a"}
+  .pagehead{row-gap:0}
+  .ph-mid:not(:empty),.pagehead .actions:not(:empty){margin-top:12px}
+  .ph-mid:empty{display:none}
+  .pagehead .actions{justify-content:flex-start}
+  .pagehead .actions:empty{display:none}
+  .ph-mid > .pb-wrap{flex:1;min-width:0}
+  .pb-wrap .periodbar{flex:1;min-width:0}
+  .periodbar .cur{flex:1;width:auto}
+  .pb-extra{position:static;transform:none;margin:0}
+}
+/* top blocks of every page in the style of "Vrij te besteden" */
+.hz-top .hz-main{grid-template-columns:minmax(0,1fr);padding-bottom:24px}
+.hz-top .hz-main:has(+ .hz-foot){padding-bottom:14px}
+.hz-hint{margin-top:10px;font-size:.84rem;color:var(--ink-3);line-height:1.4}
+.hz-top .hz-bar{display:block;margin-top:16px;height:6px;border-radius:99px;max-width:none}
+.hz-top .hz-bar i{border-radius:99px}
+.hz-foot{padding:0 28px 22px}
+/* pills that are buttons look like the other pills (no browser border) */
+button.tag{border:0;font:inherit;font-size:.82rem;cursor:pointer;line-height:normal}
+button.tag:hover{background:color-mix(in srgb,var(--gb) 12%,var(--surface-2))}
+button.tag:focus-visible{outline:2px solid var(--gb);outline-offset:2px}
+@media (max-width:760px){
+  .hz-hint{display:none}
+  .hz-top .hz-main{padding:20px 18px 20px}
+  .hz-top .hz-main:has(+ .hz-foot){padding-bottom:12px}
+  .hz-foot{padding:0 18px 18px}
+  .hz-top .hz-tags{flex-direction:column;align-items:flex-start}
+}
+/* Overzicht: the icon of "Uitgegeven" in a soft red, an expense at a glance */
+.kpi.k2 .ict{background:color-mix(in srgb,var(--sys-red) 12%,var(--surface)) !important;color:color-mix(in srgb,var(--sys-red) 72%,var(--ink)) !important}
 
 </style>
 <div class="shell">
@@ -1097,9 +1143,9 @@ const fixedDueInP = (f, p) => { for (const m of fixedMonthsP(p)) { const d = fix
 const periodLabel = p => `${fmtShort(p.start)} – ${fmtShort(p.end)} ${p.end.slice(0, 4)}`;
 /* stand-alone: above the period arrows, the name of the month in which the period ends */
 const periodMonthName = p => cap(MONTHS[+p.end.slice(5, 7) - 1]) + (p.end.slice(0, 4) !== today().slice(0, 4) ? ' ' + p.end.slice(0, 4) : '');
-const pbWrap = (p, bar) => p ? `<div class="pb-wrap"><div class="pb-month">${periodMonthName(p)}</div>${bar}</div>` : bar;
+const pbWrap = (p, bar, extra = '') => `<div class="pb-wrap"><div class="pb-month">${p ? periodMonthName(p) : ''}</div>${bar}${extra ? `<div class="pb-extra">${extra}</div>` : ''}</div>`;
 /* the bar with arrows to step through periods (or months) */
-const periodNav = (p, prev, next, label, what = 'periode', extra = '') => pbWrap(p, `<div class="periodbar"><button type="button" class="iconbtn" data-act="${prev}" aria-label="Vorige ${what}">${icon('left')}</button><span class="cur">${label}</span><button type="button" class="iconbtn" data-act="${next}" aria-label="Volgende ${what}">${icon('right')}</button>${extra}</div>`);
+const periodNav = (p, prev, next, label, what = 'periode', extra = '') => pbWrap(p, `<div class="periodbar"><button type="button" class="iconbtn" data-act="${prev}" aria-label="Vorige ${what}">${icon('left')}</button><span class="cur">${label}</span><button type="button" class="iconbtn" data-act="${next}" aria-label="Volgende ${what}">${icon('right')}</button></div>`, extra);
 const inP = (d, p) => d >= p.start && d <= p.end;
 const monthsOf = p => { const a = monthKey(p.start), b = monthKey(p.end); return a === b ? [a] : [a, b]; };
 
@@ -1714,6 +1760,8 @@ function render(force) {
   document.title = 'Mijn financiën';
   const html = VIEWS[page.id]();
   v.innerHTML = html;
+  const ph = v.querySelector(':scope > .pagehead');
+  if (ph) { let at = ph; for (const n of [...v.children]) { if (n === ph) break; if (n.classList.contains('notice')) { at.after(n); at = n; } } }
   groceryAuto();
   makeKeyboardable(v);
   VIEWS_AFTER[page.id]?.();
@@ -1733,9 +1781,14 @@ document.addEventListener('keydown', e => {
 document.addEventListener('focusout', () => setTimeout(() => { if (renderDeferred) render(); }, 0));
 
 
-const head = (title, actions = '', extra = '', sub = '') => `<div class="pagehead"><div class="ph-t"><h1><span class="ph-ic" aria-hidden="true">${icon(UI.page)}</span>${E(title)}</h1>${sub ? `<p class="ph-sub">${E(sub)}</p>` : ''}</div><div class="actions">${extra}${actions}</div></div>`;
+/* the header of every page, always the same size: icon + title (with a small line under it), the period bar in the middle, the buttons on the right */
+const head = (title, actions = '', extra = '', sub = '') => `<div class="pagehead"><div class="ph-t"><h1><span class="ph-ic" aria-hidden="true">${icon(UI.page)}</span>${E(title)}</h1><p class="ph-sub">${E(sub)}</p></div><div class="ph-mid">${extra}</div><div class="actions">${actions}</div></div>`;
 /* money with quieter cents: € 2.942<small>,31</small> */
 const money = v => { const s = eur(v), i = s.lastIndexOf(','); return i < 0 ? s : `${s.slice(0, i)}<span class="cents">${s.slice(i)}</span>`; };
+/* the block at the top of a page, in the style of "Vrij te besteden": icon in a grey square, small label, big amount,
+   a quiet line (hint, hidden on the phone like before), small pills, and an optional row at the bottom */
+const topCard = ({ ic, label, amount, hint = '', more = '', tags = '', foot = '' }) => `<div class="hero-main hz hz-top"><div class="hz-main"><div class="hz-l"><div class="hz-eyebrow"><span class="ict">${icon(ic)}</span>${E(label)}</div><div class="hz-amt">${amount}</div>${more}${hint ? `<div class="hz-hint">${hint}</div>` : ''}${tags ? `<div class="hz-tags">${tags}</div>` : ''}</div></div>${foot ? `<div class="hz-foot">${foot}</div>` : ''}</div>`;
+const topDuo = (...cards) => `<div class="hero-duo">${cards.join('')}</div>`;
 const btn = (label, act, attrs = '', cls = '') => `<button type="button" class="btn ${cls}" data-act="${act}" ${attrs}>${label}</button>`;
 /* meaning colours: one hue per kind of money, used the same way on every page */
 const pill = (txt, cls = '') => `<span class="pill ${cls}">${E(txt)}</span>`;
@@ -1920,7 +1973,7 @@ VIEWS.overzicht = () => {
   const checks = all('transactions').filter(t => t.status === 'check').length;
   const toLink = all('transactions').filter(t => linkSuggestion(t)).length;
   const f = isNow ? freeToSpend() : null;
-  const figs = `<div class="kpis"><button type="button" class="kpi k1" data-act="kpiInsight" data-k="income"><span class="lbl"><span class="ict" style="--ic:var(--sys-green)">${icon('in')}</span>Ontvangen</span><span class="val">${money(fl.income)}</span></button><button type="button" class="kpi k2" data-act="kpiInsight" data-k="spent"><span class="lbl"><span class="ict" style="--ic:var(--sys-orange)">${icon('out')}</span>Uitgegeven</span><span class="val">${money(fl.spent)}</span></button><button type="button" class="kpi k3" data-act="kpiInsight" data-k="saved"><span class="lbl"><span class="ict" style="--ic:var(--sys-purple)">${icon('sparen')}</span>Gespaard</span><span class="val">${money(fl.saved)}</span></button>${accountsSorted().filter(a => a.role === 'creditcard' && a.active !== false).map(a => { const bal = balance(a), sd = ccSettleDate(a); return `<button type="button" class="kpi k4" data-act="editAccount" data-id="${E(a.id)}"><span class="lbl"><span class="ict" style="--ic:var(--sys-indigo)">${icon('card')}</span>${E(a.name)}</span><span class="val ${bal < 0 ? 'neg' : ''}">${bal == null ? '—' : money(bal)}</span><span class="kpi-d">${bal < 0 && sd ? 'afschrijving rond ' + fmtShort(sd) : a.balanceDate ? 'saldo ' + fmtShort(a.balanceDate) : ''}</span></button>`; }).join('')}</div>`;
+  const figs = `<div class="kpis"><button type="button" class="kpi k1" data-act="kpiInsight" data-k="income"><span class="lbl"><span class="ict" style="--ic:var(--sys-green)">${icon('in')}</span>Ontvangen</span><span class="val">${money(fl.income)}</span></button><button type="button" class="kpi k2" data-act="kpiInsight" data-k="spent"><span class="lbl"><span class="ict" style="--ic:var(--sys-red)">${icon('out')}</span>Uitgegeven</span><span class="val">${money(fl.spent)}</span></button><button type="button" class="kpi k3" data-act="kpiInsight" data-k="saved"><span class="lbl"><span class="ict" style="--ic:var(--sys-purple)">${icon('sparen')}</span>Gespaard</span><span class="val">${money(fl.saved)}</span></button>${accountsSorted().filter(a => a.role === 'creditcard' && a.active !== false).map(a => { const bal = balance(a), sd = ccSettleDate(a); return `<button type="button" class="kpi k4" data-act="editAccount" data-id="${E(a.id)}"><span class="lbl"><span class="ict" style="--ic:var(--sys-indigo)">${icon('card')}</span>${E(a.name)}</span><span class="val ${bal < 0 ? 'neg' : ''}">${bal == null ? '—' : money(bal)}</span><span class="kpi-d">${bal < 0 && sd ? 'afschrijving rond ' + fmtShort(sd) : a.balanceDate ? 'saldo ' + fmtShort(a.balanceDate) : ''}</span></button>`; }).join('')}</div>`;
   let left;
   if (isNow && !f.ok) {
     left = `<span class="lbl">Vrij te besteden</span><span class="big">—</span><span class="sub">${f.reason === 'accounts' ? 'Kies eerst met welke rekening de app rekent.' : 'Vul je saldi in om te beginnen.'}</span>
@@ -2283,10 +2336,8 @@ VIEWS.vastelasten = () => {
   };
   return head('Vaste lasten', (btn('Controleren', 'checkSync')) + btn(icon('plus') + 'Vaste last', 'newFixed', '', 'primary'),
     periodNav(P, 'fprev', 'fnext', periodLabel(P), 'maand')) +
-    `<div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
-      <div class="stat" data-tone="fixed"><span class="lbl">Per maand</span><span class="val">${eur(perMonth)}</span><span class="hint">Inclusief jaarabonnementen per maand</span></div>
-      <div class="stat" data-tone="in"><span class="lbl">${'Betaald van salaris ' + fmtShort(P.start)}</span><span class="val">${eur(paidAmt)}</span><span class="bar"><i style="width:${dueAmt ? Math.min(100, paidAmt / dueAmt * 100).toFixed(1) : 0}%"></i></span><span class="hint">van ${eur(dueAmt)} · ${dueRows2.filter(x => x.paid).length} van ${dueRows2.length} posten</span></div>
-    </div>` + (`<p class="small muted" style="margin:-4px 2px 12px">Van het salaris van ${fmtLong(P.start)} betaal je alles wat daarna wordt afgeschreven, tot het volgende salaris op ${fmtLong(addDays(P.end, 1))}. Alleen betalingen in deze periode zetten een post op Betaald.</p>`) +
+    topDuo(topCard({ ic: 'vastelasten', label: 'Per maand', amount: eur(perMonth), hint: 'Inclusief jaarabonnementen per maand' }),
+      topCard({ ic: 'wallet', label: 'Betaald van salaris ' + fmtShort(P.start), amount: eur(paidAmt), more: `<span class="bar hz-bar"><i style="width:${dueAmt ? Math.min(100, paidAmt / dueAmt * 100).toFixed(1) : 0}%"></i></span>`, hint: `van ${eur(dueAmt)} · ${dueRows2.filter(x => x.paid).length} van ${dueRows2.length} posten` })) + (`<p class="small muted" style="margin:-4px 2px 12px">Van het salaris van ${fmtLong(P.start)} betaal je alles wat daarna wordt afgeschreven, tot het volgende salaris op ${fmtLong(addDays(P.end, 1))}. Alleen betalingen in deze periode zetten een post op Betaald.</p>`) +
     (fxDupCard()) + ((group('maand', 'Maandlasten', 'Per maand') + group('abonnement', 'Abonnementen', 'Per maand') + group('aflossen', 'Aflossen', 'Per maand') + group('sparen', 'Sparen (vaste inleg)', 'Per maand') + group('beleggen', 'Beleggen', 'Per maand') + (fxPotsCard()) + group('kwartaal', 'Elke 3 maanden', 'Per keer') + group('halfjaar', 'Elk half jaar', 'Per keer') + group('jaar', 'Eén keer per jaar', 'Per jaar'))) +
     (all('fixed').length ? '' : `<div class="card">${emptyState('Nog geen vaste lasten', 'Voeg je huur, verzekeringen en abonnementen toe.')}</div>`);
 };
@@ -2343,9 +2394,9 @@ VIEWS.reserveringen = () => {
     </tbody></table></div></div>`).join('');
   return head('Reserveringen', btn(icon('plus') + 'Reservering', 'newRes', '', 'primary')) + (groceryWeekOn() ? '' : groceryCard()) +
     (() => { const p = periodOf(today()), inPer = open.filter(r => r.date && r.date <= p.end), later = open.filter(r => !r.date || r.date > p.end);
-      return `<div class="card"><div class="card-h"><h2>Openstaand</h2><p class="num">Totaal <b>${eur(sum(open, resOpen))}</b></p></div>
-      <div class="res-sum">${[['now', 'Tot je volgende salaris', inPer], ['later', 'Daarna', later]].map(([w, l, list]) => { const sk = rs.filter(r => r.skip && resOpenRaw(r) > 0 && (w === 'now' ? r.date && r.date <= p.end : !r.date || r.date > p.end)).length; return `<button type="button" class="res-pick" data-act="resPick" data-w="${w}"><span>${l}</span><b>${eur(sum(list, resOpen))}</b><em>${list.length} ${list.length === 1 ? 'post' : 'posten'}${sk ? ` · ${sk} uitgevinkt` : ''} <i>Bekijken ›</i></em></button>`; }).join('')}</div>
-      <div class="seg" style="margin-top:14px"><button type="button" data-act="resv" data-v="open" aria-pressed="${UI.resView === 'open'}">Actueel · ${cur.length}</button><button type="button" data-act="resv" data-v="all" aria-pressed="${UI.resView === 'all'}">Alles · ${rs.length}</button></div></div>`; })() +
+      const pick = ([w, l, list]) => { const sk = rs.filter(r => r.skip && resOpenRaw(r) > 0 && (w === 'now' ? r.date && r.date <= p.end : !r.date || r.date > p.end)).length; return `<button type="button" class="tag" data-act="resPick" data-w="${w}">${l} <b>${eur(sum(list, resOpen))}</b> · ${list.length} ${list.length === 1 ? 'post' : 'posten'}${sk ? ` · ${sk} uitgevinkt` : ''}</button>`; };
+      return topCard({ ic: 'reserveringen', label: 'Openstaand', amount: eur(sum(open, resOpen)), tags: [['now', 'Tot je volgende salaris', inPer], ['later', 'Daarna', later]].map(pick).join(''),
+        foot: `<div class="seg"><button type="button" data-act="resv" data-v="open" aria-pressed="${UI.resView === 'open'}">Actueel · ${cur.length}</button><button type="button" data-act="resv" data-v="all" aria-pressed="${UI.resView === 'all'}">Alles · ${rs.length}</button></div>` }); })() +
     (cards || `<div class="card">${emptyState(UI.resView === 'open' ? 'Niets open' : 'Nog geen reserveringen', 'Reserveer geld voor grotere uitgaven en terugbetalingen.')}</div>`);
 };
 ACT.resPick = el => {
@@ -2410,7 +2461,7 @@ VIEWS.sparen = () => {
   }).join('');
   const g = UI.goal;
   return head('Sparen', btn(icon('plus') + 'Spaarpot', 'newSaving', '', 'primary')) +
-    `<div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))"><div class="stat" data-tone="save"><span class="lbl">Totaal gespaard</span><span class="val">${eur(total)}</span><span class="hint">Spaar- en beleggingsrekeningen</span></div><div class="stat" data-tone="save"><span class="lbl">Inleg per periode</span><span class="val">${eur(planned)}</span><span class="hint">Elke 4 weken bij je salaris</span></div></div>` +
+    topDuo(topCard({ ic: 'sparen', label: 'Totaal gespaard', amount: eur(total), hint: 'Spaar- en beleggingsrekeningen' }), topCard({ ic: 'trend', label: 'Inleg per periode', amount: eur(planned), hint: 'Elke 4 weken bij je salaris' })) +
     (() => { const nrm = accs.filter(a => !isRepay(a)), rep = accs.filter(isRepay);
       return `<div class="card"><div class="card-h"><h2>Spaarpotjes</h2><p class="num">Totaal <b>${eur(total)}</b></p></div>${nrm.length ? potRows(nrm, 0) : emptyState('Nog geen spaarpotten', 'Voeg een spaarpot toe.')}</div>` +
         (rep.length ? `<div class="card"><div class="card-h"><h2>Aflossen</h2><p>Telt niet mee in het totaal</p></div>${potRows(rep, nrm.length)}</div>` : ''); })() +
@@ -2685,10 +2736,8 @@ VIEWS.auto = () => {
   const extras = [...all('carExtra').map(x => ({ ...x, src: 'extra' })), ...parks.map(t => ({ id: t.id, name: t.name, date: t.date, amount: -t.amount, src: 'tx' }))].sort((a, b) => b.date.localeCompare(a.date));
   const rates = all('carRates').sort((a, b) => a.type.localeCompare(b.type) || b.from.localeCompare(a.from));
   return head('Auto', btn(icon('plus') + 'Kosten', 'newCarExtra') + btn(icon('plus') + 'Tankbeurt', 'newFuel', '', 'primary')) +
-    `<div class="stats" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
-      <div class="stat" data-tone="car"><span class="lbl">Verwachte kosten per maand</span><span class="val">${eur(expected)}</span><span class="hint">Verzekering ${eur(cm.insurance)} · belasting ${eur(taxPm)} · benzine gem. ${eur(avgFuel)}${cfg.fuelFrom ? ` (sinds ${fmtShort(cfg.fuelFrom)})` : ""}${avgExtra ? ' · overig gem. ' + eur(avgExtra) : ''}</span></div>
-      <div class="stat" data-tone="car"><span class="lbl">Zuinigheid</span><span class="val">${fs.eff ? '1 op ' + nr(fs.eff, 1) : 'Nog niet bekend'}</span><span class="hint">${fs.eff ? `${nr(fs.tkm, 0)} km op ${nr(fs.tl, 1)} liter · ${nr(100 / fs.eff, 1)} L per 100 km` : fs.lastKm ? `Laatste volle tank ${fmtShort(fs.lastKm.date)} bij ${nr(fs.lastKm.km, 0)} km. Vul bij je volgende tankbeurt de kilometerstand in.` : 'Vul bij twee volle tankbeurten de kilometerstand in.'}</span></div>
-    </div>
+    topDuo(topCard({ ic: 'auto', label: 'Verwachte kosten per maand', amount: eur(expected), hint: `Verzekering ${eur(cm.insurance)} · belasting ${eur(taxPm)} · benzine gem. ${eur(avgFuel)}${cfg.fuelFrom ? ` (sinds ${fmtShort(cfg.fuelFrom)})` : ""}${avgExtra ? ' · overig gem. ' + eur(avgExtra) : ''}` }),
+      topCard({ ic: 'leaf', label: 'Zuinigheid', amount: fs.eff ? '1 op ' + nr(fs.eff, 1) : 'Nog niet bekend', hint: fs.eff ? `${nr(fs.tkm, 0)} km op ${nr(fs.tl, 1)} liter · ${nr(100 / fs.eff, 1)} L per 100 km` : fs.lastKm ? `Laatste volle tank ${fmtShort(fs.lastKm.date)} bij ${nr(fs.lastKm.km, 0)} km. Vul bij je volgende tankbeurt de kilometerstand in.` : 'Vul bij twee volle tankbeurten de kilometerstand in.' })) + `
     <div class="card"><div class="card-h"><h2>Per maand</h2></div><div class="tablewrap"><table><thead><tr><th>Maand</th><th class="num hide-m"><i class="lg" data-tone="fixed"></i>Verzekering</th><th class="num hide-m"><i class="lg" data-tone="res"></i>Belasting</th><th class="num"><i class="lg" data-tone="out"></i>Benzine</th><th class="num hide-m"><i class="lg" data-tone="move"></i>Overig</th><th class="num">Totaal</th></tr></thead><tbody>
       ${rows.map(r => `<tr class="car-m"><td><b>${monthLabel(r.mk)}</b></td><td class="num hide-m">${eur(r.insurance)}</td><td class="num hide-m">${eur(r.tax)}</td><td class="num">${eur(r.fuel)}${r.fills ? `<div class="tsub">${r.fills}× getankt</div>` : ''}</td><td class="num hide-m">${eur(r.extra)}</td><td class="num"><b>${eur(r.total)}</b>${r.total > 0 ? `<span class="stack-bar">${[['fixed', r.insurance], ['res', r.tax], ['out', r.fuel], ['move', r.extra]].filter(x => x[1] > 0).map(([k, v]) => `<i data-tone="${k}" style="width:${(v / r.total * 100).toFixed(1)}%"></i>`).join('')}</span>` : ''}</td></tr>` + carFuels().filter(f => monthKey(f.date) === r.mk).sort((a, b) => b.date.localeCompare(a.date)).map(f => { const p = pairById[f.id], l = +f.liters > 0 ? +f.liters : (+f.amount > 0 && +f.price > 0 ? f.amount / f.price : 0); return `<tr class="click car-f" data-act="editFuel" data-id="${E(f.id)}"><td colspan="6"><div class="car-f-in"><span class="cf-d">${fmtShort(f.date)} · ${E(f.station || 'Tankbeurt')}</span><span>${f.km ? nr(f.km, 0) + ' km' : 'geen km-stand'}</span><span>${l ? nr(l, 2) + ' L' : '—'}</span><span>${f.price ? '€ ' + (+f.price).toFixed(3).replace('.', ',') + '/L' : 'prijs onbekend'}</span><span>${p ? '1 op ' + nr(p.eff, 1) : f.km && f.full !== false ? 'startpunt' : f.full === false ? 'niet vol' : ''}</span><b>${eur(f.amount)}</b></div></td></tr>`; }).join('') + ``).join('')}</tbody></table></div></div>
     <div class="cols">
