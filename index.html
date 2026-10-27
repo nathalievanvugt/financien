@@ -724,26 +724,25 @@ button.pill,.tablewrap .btn.sm{min-height:24px;min-width:24px}
 
 /* ===== one page layout for every page (27-10-2026) =====
    The header always has the same height: title row + one line under it (empty on most pages).
-   Wide: title | period bar (centred) | buttons, all on one line.
-   Medium: title row, then the period bar on the left and the buttons on the right.
-   Phone: title row, period bar over the full width, buttons under it. */
-.pagehead{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);grid-template-areas:"t m a";column-gap:16px;row-gap:12px;align-items:start}
+   Wide: title | period bar, light button, blue button (right, against each other), all on one line.
+   Medium: title row, then period bar and buttons on the right.
+   Phone: title row, period bar over the full width, buttons under it. Every button in the header has the same size. */
+.pagehead{display:grid;grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"t m a";column-gap:8px;row-gap:12px;align-items:start}
 .ph-t{grid-area:t;display:flex;flex-direction:column;gap:2px;min-width:0}
 .pagehead h1{height:40px;white-space:nowrap}
 .ph-sub{font-size:.88rem;color:var(--ink-2);line-height:18px;height:18px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:42px}
 .ph-mid{grid-area:m;display:flex;align-items:center;gap:8px;min-height:40px}
 .ph-mid:empty{min-height:0}
 .pagehead .actions{grid-area:a;display:flex;gap:8px;align-items:center;justify-content:flex-end;height:40px}
-.pagehead .actions .btn{height:36px;padding:0 14px;font-size:.88rem;font-weight:600;border-radius:10px;gap:7px;line-height:1}
+.pagehead .actions .btn{height:36px;width:144px;padding:0 10px;font-size:.88rem;font-weight:600;border-radius:10px;gap:7px;line-height:1}
 .pagehead .actions .btn svg{width:16px;height:16px}
 /* the period bar: month name on its left, always the same widths, so nothing moves */
 .pb-wrap{position:relative;display:flex;align-items:center;gap:10px}
-.pb-month{width:92px;flex:none;text-align:right;font-weight:700;font-size:.95rem;line-height:1.2;white-space:nowrap}
 .periodbar{display:flex;align-items:center;height:40px;box-sizing:border-box;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:3px;gap:2px}
 .periodbar .cur{width:176px;flex:none}
-.pb-extra{position:absolute;left:100%;top:50%;transform:translateY(-50%);margin-left:8px}
+.pb-extra{position:absolute;right:100%;top:50%;transform:translateY(-50%);margin-right:8px}
 @media (max-width:1239px){
-  .pagehead{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"t t" "m a"}
+  .pagehead{grid-template-columns:minmax(0,1fr) auto auto;grid-template-areas:"t t t" ". m a"}
   .ph-mid,.ph-mid:empty{min-height:40px}
 }
 @media (max-width:760px){
@@ -751,7 +750,6 @@ button.pill,.tablewrap .btn.sm{min-height:24px;min-width:24px}
   .pagehead{row-gap:0}
   .ph-mid:not(:empty),.pagehead .actions:not(:empty){margin-top:12px}
   .ph-mid:empty{display:none}
-  .pagehead .actions{justify-content:flex-start}
   .pagehead .actions:empty{display:none}
   .ph-mid > .pb-wrap{flex:1;min-width:0}
   .pb-wrap .periodbar{flex:1;min-width:0}
@@ -1141,9 +1139,8 @@ function inFixedP(f, d, p) {
 const fixedMonthsP = p => [...new Set([addMonths(monthKey(p.start), -1), ...monthsOf(p), ...(p.mk ? [p.mk, addMonths(p.mk, 1)] : [])])].sort();
 const fixedDueInP = (f, p) => { for (const m of fixedMonthsP(p)) { const d = fixedDue(f, m); if (d && inFixedP(f, d, p)) return d; } return null; };
 const periodLabel = p => `${fmtShort(p.start)} – ${fmtShort(p.end)} ${p.end.slice(0, 4)}`;
-/* stand-alone: above the period arrows, the name of the month in which the period ends */
-const periodMonthName = p => cap(MONTHS[+p.end.slice(5, 7) - 1]) + (p.end.slice(0, 4) !== today().slice(0, 4) ? ' ' + p.end.slice(0, 4) : '');
-const pbWrap = (p, bar, extra = '') => `<div class="pb-wrap"><div class="pb-month">${p ? periodMonthName(p) : ''}</div>${bar}${extra ? `<div class="pb-extra">${extra}</div>` : ''}</div>`;
+/* the period bar with its arrows (and on Overzicht the button "Nu" next to it) */
+const pbWrap = (p, bar, extra = '') => `<div class="pb-wrap">${bar}${extra ? `<div class="pb-extra">${extra}</div>` : ''}</div>`;
 /* the bar with arrows to step through periods (or months) */
 const periodNav = (p, prev, next, label, what = 'periode', extra = '') => pbWrap(p, `<div class="periodbar"><button type="button" class="iconbtn" data-act="${prev}" aria-label="Vorige ${what}">${icon('left')}</button><span class="cur">${label}</span><button type="button" class="iconbtn" data-act="${next}" aria-label="Volgende ${what}">${icon('right')}</button></div>`, extra);
 const inP = (d, p) => d >= p.start && d <= p.end;
@@ -1722,8 +1719,9 @@ const icon = (k, cls = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" class
 
 const PAGES = [
   { id: 'overzicht', title: 'Overzicht' }, { id: 'transacties', title: 'Transacties' }, { id: 'vastelasten', title: 'Vaste lasten' },
-  { id: 'reserveringen', title: 'Reserveringen' }, { id: 'sparen', title: 'Sparen' }, { id: 'salaris', title: 'Inkomsten' },
+  { id: 'reserveringen', title: 'Reserveringen' },
   { id: 'kind', get title() { const k = kids(); return k.length === 1 ? k[0].name : 'Kinderen'; } },
+  { id: 'sparen', title: 'Sparen' }, { id: 'salaris', title: 'Inkomsten' },
   { id: 'auto', title: 'Auto' }, { id: 'instellingen', title: 'Instellingen' },
 ];
 /* pages shown now: no Documenten in the stand-alone edition, no Auto without a car */
@@ -4747,7 +4745,6 @@ VIEWS.kind = () => {
   // same style as the blocks on the dashboard
   const ibanTxt = own ? (own.iban ? E(own.iban.replace(/(.{4})/g, '$1 ').trim()) : 'rekeningnummer nog invullen') + (own.balanceDate ? ' · saldo ingevuld op ' + fmtD(own.balanceDate) : '') : '';
   const top = `<div class="hero-main hz hz-kid kid-top2">${heroFree({ ...f, saldo: f.pot, ccDebt: 0 }, { title: 'Vrij te besteden ' + k.name, icon: 'kind', noRing: true, saldoLabel: own ? 'Saldo ' + own.name : 'Geld van ' + k.name + ' nu',
-      extraTag: own && own.iban ? `<button type="button" class="tag" data-act="kidMoneyEdit" style="cursor:pointer">Rekening en saldo</button>` : '',
       note: `<p class="small muted" style="margin-top:8px">Tot en met ${fmtLong(f.p.end)}. Het saldo telt niet mee.${ibanTxt ? ' ' + ibanTxt + '.' : ''}</p>` })}</div>
     ${own && f.advance > 0 ? `<div class="notice info"><span><b>Voorgeschoten voor ${E(k.name)}, nog terughalen: ${eur(f.advance)}.</b> Dit betaalde Arjan voor ${E(k.name)} van zijn eigen rekening en haalde hij nog niet terug van ${E(own.name)}.</span></div>` : ''}
     ${!own || !own.iban ? `<div class="notice"><span>Vul het rekeningnummer van de spaarrekening van ${E(k.name)} in. Dan komen alleen de overboekingen tussen jouw rekening en dat nummer bij ${E(k.name)}.</span><button type="button" class="btn sm" data-act="kidMoneyEdit">Invullen</button></div>` : ''}`;
@@ -4763,7 +4760,7 @@ VIEWS.kind = () => {
   const tin = r2(sum(trs.filter(t => kidInto(t, own)), t => Math.abs(+t.amount))), tout = r2(sum(trs.filter(t => !kidInto(t, own)), t => Math.abs(+t.amount))), lim = UI.kidTrLimit || 50;
   const trList = trs.slice(0, lim).map(t => { const inn = kidInto(t, own), pt0 = kidPartyTxt(t, k), pt = pt0 && pt0 !== kidTxTitle(t) ? pt0 : '';
     return `<button type="button" class="li" data-act="kidTxName" data-id="${E(t.id)}">${kindTile(inn ? 'in' : 'out', inn ? 'var(--sys-green)' : 'var(--sys-red)')}<span class="grow"><b>${E(kidTxTitle(t))}</b><span class="tsub">${fmtShort(t.date)} ${t.date.slice(0, 4)} · ${inn ? 'Gestort' : 'Opgenomen'}${pt ? ' · ' + E(pt) : ''}</span></span><span class="amt${inn ? ' pos' : ''}">${inn ? '+' : '−'}${eur(Math.abs(+t.amount))}</span></button>`; }).join('');
-  return head(k.name, btn(icon('plus') + 'Toeslag', 'kidNewIncome', '', 'primary'), sel + mbar, age != null ? `${age} jaar${k.birth ? ' · jarig op ' + fmtShort(k.birth) : ''}` : '') + top + `
+  return head(k.name, (own && own.iban ? btn('Rekening en saldo', 'kidMoneyEdit') : '') + btn(icon('plus') + 'Toeslag', 'kidNewIncome', '', 'primary'), sel + mbar, age != null ? `${age} jaar${k.birth ? ' · jarig op ' + fmtShort(k.birth) : ''}` : '') + top + `
     <div class="card"><div class="card-h"><h2>Ontvangen · rekening Arjan</h2><button type="button" class="btn sm" data-act="kidNewIncome">${icon('plus')}Toevoegen</button></div>
       ${incRows ? table(incRows) : emptyState('Nog geen toeslagen', 'Voeg kinderbijslag, kindgebonden budget of een bijdrage toe.')}
       ${incOther ? `<p class="small muted" style="margin-top:6px">${incOther} ${incOther === 1 ? 'toeslag komt' : 'toeslagen komen'} niet in ${mn}.</p>` : ''}
