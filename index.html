@@ -789,6 +789,14 @@ html{scrollbar-gutter:stable}
 /* whole pixels for the side margins (no fractions that round differently per page) */
 @media (max-width:1239px){.main{padding-inline:32px}}
 @media (max-width:760px){.main{padding-inline:16px}}
+/* Inkomsten › Calculator: salaris volgens de cao */
+.cao .xh button.link{font-size:.8rem;text-transform:none;letter-spacing:0}
+.cao-yh{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 8px}
+.cao-yh .periodbar .cur{width:72px}
+.cao tr.cao-now td{background:color-mix(in srgb,var(--gb) 6%,var(--surface))}
+.cao tr.cao-tot td{border-bottom:0;border-top:2px solid var(--line)}
+/* phone: a long line under a status or amount (e.g. "2× deze periode: …") wraps instead of pushing the table wider than the screen */
+@media (max-width:760px){.tablewrap td.num .tsub{white-space:normal;min-width:0;max-width:112px;margin-left:auto}.tablewrap td.num :is(.pill,button.pill){white-space:normal;text-align:center;line-height:1.25;max-width:96px}}
 
 </style>
 <div class="shell">
@@ -1732,9 +1740,8 @@ const icon = (k, cls = '') => `<svg viewBox="0 0 24 24" aria-hidden="true" class
 
 const PAGES = [
   { id: 'overzicht', title: 'Overzicht' }, { id: 'transacties', title: 'Transacties' }, { id: 'vastelasten', title: 'Vaste lasten' },
-  { id: 'reserveringen', title: 'Reserveringen' },
   { id: 'kind', get title() { const k = kids(); return k.length === 1 ? k[0].name : 'Kinderen'; } },
-  { id: 'sparen', title: 'Sparen' }, { id: 'salaris', title: 'Inkomsten' },
+  { id: 'reserveringen', title: 'Reserveringen' }, { id: 'sparen', title: 'Sparen' }, { id: 'salaris', title: 'Inkomsten' },
   { id: 'auto', title: 'Auto' }, { id: 'instellingen', title: 'Instellingen' },
 ];
 /* pages shown now: no Documenten in the stand-alone edition, no Auto without a car */
@@ -2617,7 +2624,7 @@ ACT.undoExtra = el => {
 const salCalcView = () => {
   const seg = `<div class="seg"><button type="button" data-act="salTab" data-v="overzicht" aria-pressed="${UI.salTab === 'overzicht'}">Overzicht</button><button type="button" data-act="salTab" data-v="calc" aria-pressed="${UI.salTab === 'calc'}">Calculator</button></div>`;
   const h = head('Inkomsten', btn(icon('plus') + 'Salaris', 'newSalary', '', 'primary')) + `<div class="toolbar">${seg}</div>`;
-  return h + calcView();
+  return h + calcView() + caoCard();
 };
 ACT.planSalary = el => {
   const d = el.dataset.d, pl = salPlan(d) || {}, w = expWeekend();
@@ -2648,7 +2655,7 @@ ACT.planSalary = el => {
 ACT.salTab = el => { UI.salTab = el.dataset.v; render(); };
 function calcDefaults() {
   const s = C().salary, d = nextPayDates(1)[0], weeks = +s.weeks || 4;
-  return { mode: 'dagen', days: Math.round((+s.weeklyHours || 36) * weeks / (+s.hoursPerDay || 8)), hours: (+s.weeklyHours || 36) * weeks, rate: rateAt(d), weeks, sat: expWeekend().sat, sun: expWeekend().sun };
+  return { mode: 'dagen', days: Math.round((+s.weeklyHours || 36) * weeks / (+s.hoursPerDay || 8)), hours: (+s.weeklyHours || 36) * weeks, rate: rateAt(d), weeks };
 }
 function calcView() {
   if (!UI.calc) UI.calc = calcDefaults();
@@ -2656,7 +2663,7 @@ function calcView() {
   const inp = (k, l, o = {}) => `<label class="f">${l}<input type="number" step="any" inputmode="decimal" id="calc-${k}" data-live="calc" data-k="${k}" value="${E(c[k] ?? '')}" ${o.min != null ? `min="${o.min}"` : ''}></label>`;
   return `<div class="cols"><div class="card"><div class="card-h"><h2>Invoer</h2><div class="seg"><button type="button" data-act="calcMode" data-v="dagen" aria-pressed="${c.mode === 'dagen'}">Dagen</button><button type="button" data-act="calcMode" data-v="uren" aria-pressed="${c.mode === 'uren'}">Uren</button></div></div>
     <div class="grid2">${c.mode === 'dagen' ? inp('days', 'Betaalde dagen', { min: 0 }) : inp('hours', 'Gewerkte uren', { min: 0 })}${inp('rate', 'Uurloon (€)', { min: 0 })}
-    ${inp('weeks', 'Loonweken', { min: 1 })}${inp('sat', `Zaterdagen (+${nr(s.saturdayPct * 100)}%)`, { min: 0 })}${inp('sun', `Zondagen (+${nr(s.sundayPct * 100)}%)`, { min: 0 })}</div>
+    ${inp('weeks', 'Loonweken', { min: 1 })}</div>
     <p class="small muted" style="margin-top:12px">Een dag is ${nr(s.hoursPerDay)} uur. EJU is ${nr(s.eju * 100, 1)}% van het basisloon, de zorgvergoeding ${eur(s.carePerWeek)} per loonweek. Aanpassen kan bij Instellingen.</p></div>
     <div class="card" id="calcOut">${calcOut()}</div></div>`;
 }
@@ -2664,13 +2671,12 @@ function calcOut() {
   const c = UI.calc, s = C().salary, hpd = +s.hoursPerDay || 8;
   const hours = c.mode === 'dagen' ? (+c.days || 0) * hpd : (+c.hours || 0);
   const rate = +c.rate || 0;
-  const g = calcGross({ hours, rate, weeks: +c.weeks || 0, saturdays: +c.sat || 0, sundays: +c.sun || 0 });
+  const g = calcGross({ hours, rate, weeks: +c.weeks || 0, saturdays: 0, sundays: 0 });
   const nf = netFactor(), net = g.gross * nf.factor;
   return `<div class="card-h"><h2>Verwacht netto</h2></div>
     <div style="font-family:var(--f-display);font-size:2.2rem;font-weight:600;line-height:1.1" class="num">${eur(net)}</div>
     ${nf.n ? `<p class="small muted" style="margin:4px 0 14px">Tussen ${eur(g.gross * nf.min)} en ${eur(g.gross * nf.max)} op basis van eerdere loonstroken</p>` : '<p class="small muted" style="margin:4px 0 14px">Met de standaard nettofactor</p>'}
     <dl class="kv"><dt>Basis · ${nr(hours)} uur × ${eur(rate)}</dt><dd>${eur(g.base)}</dd><dt>EJU ${nr(s.eju * 100, 1)}%</dt><dd>${eurS(g.eju)}</dd><dt>Zorgvergoeding</dt><dd>${eurS(g.care)}</dd>
-      ${g.sat ? `<dt>Zaterdagtoeslag</dt><dd>${eurS(g.sat)}</dd>` : ''}${g.sun ? `<dt>Zondagtoeslag</dt><dd>${eurS(g.sun)}</dd>` : ''}
       <dt class="tot">Bruto</dt><dd class="tot">${eur(g.gross)}</dd><dt>Nettofactor</dt><dd>${pct(nf.factor)}</dd></dl>
     <div style="margin-top:14px"><button type="button" class="btn" data-act="calcSave">Opslaan als salaris</button></div>`;
 }
@@ -2678,8 +2684,8 @@ LIVE.calc = el => { UI.calc[el.dataset.k] = el.value === '' ? '' : parseFloat(el
 ACT.calcMode = el => { const c = UI.calc, hpd = +C().salary.hoursPerDay || 8; if (el.dataset.v === 'uren' && c.mode === 'dagen') c.hours = (+c.days || 0) * hpd; if (el.dataset.v === 'dagen' && c.mode === 'uren') c.days = r2((+c.hours || 0) / hpd); c.mode = el.dataset.v; render(); };
 ACT.calcSave = () => {
   const c = UI.calc, hpd = +C().salary.hoursPerDay || 8, hours = c.mode === 'dagen' ? (+c.days || 0) * hpd : +c.hours || 0;
-  const g = calcGross({ hours, rate: +c.rate, weeks: +c.weeks, saturdays: +c.sat, sundays: +c.sun });
-  salaryForm(null, { payDate: nextPayDates(1)[0], hours, rate: +c.rate, weeks: +c.weeks, saturdays: +c.sat, sundays: +c.sun, gross: r2(g.gross), net: r2(g.gross * netFactor().factor), note: 'Berekend met de calculator' });
+  const g = calcGross({ hours, rate: +c.rate, weeks: +c.weeks, saturdays: 0, sundays: 0 });
+  salaryForm(null, { payDate: nextPayDates(1)[0], hours, rate: +c.rate, weeks: +c.weeks, saturdays: 0, sundays: 0, gross: r2(g.gross), net: r2(g.gross * netFactor().factor), note: 'Berekend met de calculator' });
 };
 ACT.newSalary = () => salaryForm(null);
 ACT.editSalary = (el, e) => { if (e?.target?.closest('[data-stop]')) return; salaryForm(S.salaries.get(el.dataset.id)); };
@@ -2806,6 +2812,86 @@ function carExtraForm(x) {
     extraFoot: isNew ? '' : delBtn(), actions: { delete: () => del('carExtra', x.id, `${x.name} verwijderd`) },
     onSubmit: async v => { if (!isFinite(v.amount)) throw new Error('Vul het bedrag in.'); await put('carExtra', { ...x, ...v, amount: r2(v.amount) }, `${v.name} opgeslagen`); } });
 }
+
+/* ================= Salaris volgens de cao (calculator-tab) =================
+   Arjan vult zijn bruto maandsalaris in en de maand waarin dat gold. Elke cao-verhoging (percentage vanaf een maand)
+   komt daar bovenop, de een na de ander. Extra uitkeringen: een percentage van het salaris van de 12 maanden tot en met
+   de maand van uitbetaling (eindejaarsuitkering, vakantietoeslag), of een vast bedrag (eenmalige uitkering, naar rato
+   van de deeltijd). Alles bruto; het telt niet mee in de andere berekeningen van de app. */
+const CAO_DEFAULT = () => ({
+  base: +C().salary.fixedGross || null, baseFrom: '2026-06', parttime: 100,
+  raises: [{ id: 'r-2026-07', pct: 4, from: '2026-07', note: 'cao mbo 2026-2028' }, { id: 'r-2027-01', pct: 3, from: '2027-01', note: 'cao mbo 2026-2028' }],
+  extras: [
+    { id: 'x-eju', name: 'Eindejaarsuitkering', kind: 'pct', value: 8.33, month: 12, once: null },
+    { id: 'x-vak', name: 'Vakantietoeslag', kind: 'pct', value: 8, month: 5, once: null },
+    { id: 'x-eenmalig', name: 'Eenmalige uitkering cao', kind: 'eur', value: 1700, month: 7, once: 2026, rato: true },
+  ],
+});
+const caoCfg = () => C().cao || CAO_DEFAULT();
+/* gross salary in month mk: the base, with every raise from after the base month up to and including mk */
+function caoSalary(c, mk) {
+  if (!(+c.base > 0)) return 0;
+  let v = +c.base;
+  for (const r of (c.raises || []).slice().sort((a, b) => a.from.localeCompare(b.from))) if (r.from > c.baseFrom && r.from <= mk) v *= 1 + (+r.pct || 0) / 100;
+  return r2(v);
+}
+/* what an extra pays in month mk (0 when it is not paid that month) */
+function caoExtra(c, x, mk) {
+  const y = +mk.slice(0, 4), m = +mk.slice(5, 7);
+  if (m !== +x.month || (x.once && +x.once !== y)) return 0;
+  if (x.kind === 'eur') return r2((+x.value || 0) * (x.rato ? (+c.parttime || 100) / 100 : 1));
+  let tot = 0; for (let i = 0; i < 12; i++) tot += caoSalary(c, addMonths(mk, -i));
+  return r2(tot * (+x.value || 0) / 100);
+}
+function caoYear(c, y) {
+  return Array.from({ length: 12 }, (_, i) => { const mk = `${y}-${String(i + 1).padStart(2, '0')}`, sal = caoSalary(c, mk);
+    const ex = (c.extras || []).map(x => ({ x, v: caoExtra(c, x, mk) })).filter(e => e.v > 0);
+    const raise = (c.raises || []).filter(r => r.from === mk && r.from > c.baseFrom);
+    return { mk, sal, ex, raise, tot: r2(sal + sum(ex, e => e.v)) }; });
+}
+const caoMonthTxt = x => cap(MONTHS[(+x.month || 1) - 1]) + (x.once ? ' ' + x.once : ', elk jaar');
+function caoCard() {
+  const c = caoCfg(), y = UI.caoYear || +today().slice(0, 4), rows = caoYear(c, y), totSal = sum(rows, r => r.sal), totEx = sum(rows, r => sum(r.ex, e => e.v));
+  const raises = (c.raises || []).slice().sort((a, b) => a.from.localeCompare(b.from));
+  const nowMk = monthKey(today());
+  const raiseList = raises.length ? `<div class="list">${raises.map(r => `<button type="button" class="li" data-act="caoRaise" data-id="${E(r.id)}"><span class="grow"><b>+${nr(+r.pct, 2)}%</b><span class="tsub">vanaf ${monthLabel(r.from).toLowerCase()}${r.note ? ' · ' + E(r.note) : ''}${r.from <= c.baseFrom ? ' · zit al in je salaris' : ''}</span></span><span class="num">${eur(caoSalary(c, r.from))}</span></button>`).join('')}</div>` : '<p class="small muted">Nog geen verhogingen.</p>';
+  const exList = (c.extras || []).length ? `<div class="list">${c.extras.map(x => `<button type="button" class="li" data-act="caoExtraEdit" data-id="${E(x.id)}"><span class="grow"><b>${E(x.name)}</b><span class="tsub">${x.kind === 'pct' ? nr(+x.value, 2) + '% van het salaris van 12 maanden' : eur(+x.value) + (x.rato ? ' (naar rato van je deeltijd)' : '')} · ${caoMonthTxt(x)}</span></span></button>`).join('')}</div>` : '<p class="small muted">Nog geen extra uitkeringen.</p>';
+  const table = `<div class="tablewrap"><table><thead><tr><th>Maand</th><th class="num">Salaris</th><th class="num">Extra</th><th class="num">Totaal bruto</th></tr></thead><tbody>${rows.map(r => `<tr${r.mk === nowMk ? ' class="cao-now"' : ''}><td><b>${cap(MONTHS[+r.mk.slice(5) - 1])}</b>${r.raise.length ? `<div class="tsub">+${r.raise.map(x => nr(+x.pct, 2) + '%').join(' +')} verhoging</div>` : ''}</td><td class="num">${r.sal ? eur(r.sal) : '—'}</td><td class="num">${r.ex.length ? eur(sum(r.ex, e => e.v)) + `<div class="tsub">${r.ex.map(e => E(e.x.name)).join(', ')}</div>` : ''}</td><td class="num"><b>${r.tot ? eur(r.tot) : '—'}</b></td></tr>`).join('')}
+    <tr class="cao-tot"><td><b>Totaal ${y}</b></td><td class="num">${eur(totSal)}</td><td class="num">${eur(totEx)}</td><td class="num"><b>${eur(totSal + totEx)}</b></td></tr></tbody></table></div>`;
+  return `<div class="card cao"><div class="card-h"><h2>Salaris volgens de cao</h2><button type="button" class="btn sm" data-act="caoBase">Salaris instellen</button></div>
+    ${+c.base > 0 ? `<p class="small muted" style="margin:0 0 14px">Bruto ${eur(+c.base)} per maand in ${monthLabel(c.baseFrom).toLowerCase()}${+c.parttime !== 100 ? ` · deeltijd ${nr(+c.parttime)}%` : ''}. Elke verhoging hieronder komt daar bovenop. Alles is bruto.</p>` : `<p class="small muted" style="margin:0 0 14px">Vul eerst je bruto maandsalaris in bij <i>Salaris instellen</i>.</p>`}
+    <h3 class="xh">Verhogingen <span><button type="button" class="link" data-act="caoRaise">+ Verhoging</button></span></h3>${raiseList}
+    <h3 class="xh" style="margin-top:14px">Extra uitkeringen <span><button type="button" class="link" data-act="caoExtraEdit">+ Uitkering</button></span></h3>${exList}
+    <div class="cao-yh"><h3 class="xh" style="margin:0">Per maand</h3><div class="periodbar"><button type="button" class="iconbtn" data-act="caoY" data-d="-1" aria-label="Vorig jaar">${icon('left')}</button><span class="cur">${y}</span><button type="button" class="iconbtn" data-act="caoY" data-d="1" aria-label="Volgend jaar">${icon('right')}</button></div></div>
+    ${table}
+    <p class="small muted" style="margin-top:10px">Bruto bedragen. Over een uitkering zoals de eindejaarsuitkering of vakantietoeslag gaat vaak meer belasting af dan over je gewone salaris (bijzonder tarief), dus netto krijg je daar naar verhouding minder van.</p></div>`;
+}
+const caoSave = (patch, label) => saveConfig({ cao: { ...caoCfg(), ...patch } }, label);
+const caoMonthFields = (mk, label) => `${F.select('m', label, String(+mk.slice(5, 7)), MONTHS.map((n, i) => [String(i + 1), cap(n)]))}${F.num('y', 'Jaar', +mk.slice(0, 4), { step: 1 })}`;
+const caoMk = v => { const y = Math.round(+v.y), m = Math.round(+v.m); if (!(y > 1999 && y < 2100) || !(m >= 1 && m <= 12)) throw new Error('Kies een geldige maand en een jaar.'); return `${y}-${String(m).padStart(2, '0')}`; };
+ACT.caoY = el => { UI.caoYear = (UI.caoYear || +today().slice(0, 4)) + +el.dataset.d; render(); };
+ACT.caoBase = () => { const c = caoCfg();
+  openSheet({ title: 'Salaris instellen', body: `<div class="grid2">${F.money('base', 'Bruto maandsalaris', c.base, { req: 1 })}${F.num('parttime', 'Deeltijd (%)', c.parttime ?? 100, { step: 1 })}${caoMonthFields(c.baseFrom, 'Dit salaris kreeg je in')}</div>
+    <p class="small muted" style="margin-top:8px">Kies de maand van je loonstrook. Verhogingen tot en met die maand zitten al in dit bedrag; latere komen erbovenop. De deeltijd geldt alleen voor vaste bedragen die naar rato zijn, zoals de eenmalige uitkering.</p>`,
+    onSubmit: v => { if (!(v.base > 0)) throw new Error('Vul je bruto maandsalaris in.'); const pt = v.parttime == null ? 100 : +v.parttime; if (!(pt > 0 && pt <= 100)) throw new Error('Vul een deeltijd tussen 1 en 100% in.');
+      return caoSave({ base: r2(v.base), parttime: pt, baseFrom: caoMk(v) }, 'Salaris voor de cao-berekening'); } }); };
+ACT.caoRaise = el => { const c = caoCfg(), r = (c.raises || []).find(x => x.id === el.dataset.id), mk = r ? r.from : addMonths(monthKey(today()), 1);
+  openSheet({ title: r ? 'Verhoging wijzigen' : 'Verhoging toevoegen', body: `<div class="grid2">${F.num('pct', 'Verhoging (%)', r ? r.pct : '', { req: 1 })}${F.text('note', 'Omschrijving (mag leeg)', r?.note || '')}${caoMonthFields(mk, 'Vanaf')}</div>`,
+    extraFoot: r ? '<button type="button" class="btn danger left" data-act="caoRaiseDel">Verwijderen</button>' : '',
+    actions: { caoRaiseDel: () => { closeSheet(); return caoSave({ raises: c.raises.filter(x => x.id !== r.id) }, 'Verhoging verwijderd'); } },
+    onSubmit: v => { if (!isFinite(v.pct) || v.pct === 0) throw new Error('Vul een percentage in.'); const x = { id: r ? r.id : uid('r'), pct: +v.pct, from: caoMk(v), note: v.note || '' };
+      return caoSave({ raises: [...(c.raises || []).filter(y => y.id !== x.id), x] }, r ? 'Verhoging gewijzigd' : 'Verhoging toegevoegd'); } }); };
+ACT.caoExtraEdit = el => { const c = caoCfg(), x = (c.extras || []).find(e => e.id === el.dataset.id);
+  openSheet({ title: x ? 'Uitkering wijzigen' : 'Uitkering toevoegen', body: `<div class="grid2">${F.text('name', 'Naam', x?.name || '', { req: 1, cls: 'span2' })}
+    ${F.select('kind', 'Soort', x?.kind || 'pct', [['pct', 'Percentage van het salaris'], ['eur', 'Vast bedrag']])}${F.num('value', 'Percentage of bedrag', x ? x.value : '', { req: 1 })}
+    ${F.select('m', 'Uitbetaald in', String(x?.month || 12), MONTHS.map((n, i) => [String(i + 1), cap(n)]))}${F.select('rep', 'Hoe vaak', x?.once ? 'once' : 'year', [['year', 'Elk jaar'], ['once', 'Eén keer']])}
+    ${F.num('y', 'In het jaar', x?.once || +today().slice(0, 4), { step: 1, when: 'rep=once' })}${F.check('rato', 'Naar rato van mijn deeltijd', x ? !!x.rato : false, { when: 'kind=eur' })}</div>
+    <p class="small muted" style="margin-top:8px">Een percentage telt over je salaris van de 12 maanden tot en met de maand van uitbetaling.</p>`,
+    extraFoot: x ? '<button type="button" class="btn danger left" data-act="caoExtraDel">Verwijderen</button>' : '',
+    actions: { caoExtraDel: () => { closeSheet(); return caoSave({ extras: c.extras.filter(e => e.id !== x.id) }, 'Uitkering verwijderd'); } },
+    onSubmit: v => { if (!isFinite(v.value) || !(v.value > 0)) throw new Error('Vul een percentage of bedrag in.'); const once = v.rep === 'once' ? Math.round(+v.y) : null; if (once != null && !(once > 1999 && once < 2100)) throw new Error('Vul een geldig jaar in.');
+      const n = { id: x ? x.id : uid('x'), name: v.name, kind: v.kind === 'eur' ? 'eur' : 'pct', value: +v.value, month: +v.m, once, rato: v.kind === 'eur' && !!v.rato };
+      return caoSave({ extras: [...(c.extras || []).filter(e => e.id !== n.id), n] }, x ? 'Uitkering gewijzigd' : 'Uitkering toegevoegd'); } }); };
 
 /* ================= files and bank import ================= */
 const docUrl = d => { const u = d.url || ('/_blob/' + d.assetId); return /^(https:|\/_blob\/)/.test(u) ? u : '#'; }; // M3: never a javascript: link
