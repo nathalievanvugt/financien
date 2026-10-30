@@ -818,6 +818,14 @@ html{scrollbar-gutter:stable}
 .cao button.cao-ex{all:unset;cursor:pointer;display:inline-flex;flex-direction:column;align-items:flex-end;text-align:right}
 .cao button.cao-ex:hover{color:var(--gb)}
 .cao .tsub button.cao-ex{display:inline;text-decoration:underline dotted}
+/* the little hidden heart (Budget voor liefkie) */
+.hero-main.hz{position:relative}
+.lf-heart{position:absolute;right:12px;bottom:10px;width:20px;height:20px;padding:0;border:0;background:none;cursor:pointer;color:var(--ink-3);opacity:.28;display:grid;place-items:center;z-index:1}
+.lf-heart svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+.lf-heart:hover,.lf-heart:focus-visible{opacity:1;color:var(--sys-pink)}
+.lf-list .li{padding-block:8px}
+.lf-del svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.lf-del.armed{width:auto;padding:0 10px;color:var(--neg);font-size:.82rem;font-weight:600}
 
 </style>
 <div class="shell">
@@ -2022,7 +2030,7 @@ function heroFree(f, o = {}) {
       ${o.noRing ? '' : `<div class="hz-ring2" title="Salaris op ${fmtLong(pay)}">${(() => { const r = 42, c = 2 * Math.PI * r;
           return `<div class="hz-r2"><svg viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="fadeR" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--fd-a)"/><stop offset="1" stop-color="var(--fd-b)"/></linearGradient></defs><circle cx="50" cy="50" r="${r}" class="trk"/>${frac > 0 ? `<circle cx="50" cy="50" r="${r}" class="arc" stroke-dasharray="${(c * frac).toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 50 50)"/>` : ''}</svg><div class="hz-r2c"><b>${left}</b><span>${left === 1 ? 'dag' : 'dagen'}</span></div></div><div class="hz-dl">salaris ${fmtShort(pay)}</div>`; })()}</div>`}
     </div>
-    <details class="hz-calc"><summary>Zo is dit berekend</summary><div class="calc-lines">${f.lines.map(l => `<div><span>${E(l.label)}</span><span>${eurS(l.v)}</span></div>`).join('')}<div class="tot"><span>${E(o.title || 'Vrij te besteden')}</span><span>${eur(f.total)}</span></div></div>${o.note || ''}</details>`;
+    ${o.heart ? `<button type="button" class="lf-heart" data-act="liefkie" aria-label="♡"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7.5-4.4-7.5-10A4.3 4.3 0 0 1 12 7.5 4.3 4.3 0 0 1 19.5 10c0 5.6-7.5 10-7.5 10z"/></svg></button>` : ''}<details class="hz-calc"><summary>Zo is dit berekend</summary><div class="calc-lines">${f.lines.map(l => `<div><span>${E(l.label)}</span><span>${eurS(l.v)}</span></div>`).join('')}<div class="tot"><span>${E(o.title || 'Vrij te besteden')}</span><span>${eur(f.total)}</span></div></div>${o.note || ''}</details>`;
 }
 
 VIEWS.overzicht = () => {
@@ -2037,14 +2045,14 @@ VIEWS.overzicht = () => {
     left = `<span class="lbl">Vrij te besteden</span><span class="big">—</span><span class="sub">${f.reason === 'accounts' ? 'Kies eerst met welke rekening de app rekent.' : 'Vul je saldi in om te beginnen.'}</span>
       <div class="hero-actions"><button type="button" class="btn onaccent" data-act="${f.reason === 'accounts' ? 'editFree' : 'cleanSlate'}">${f.reason === 'accounts' ? 'Rekening kiezen' : 'Saldi invullen'}</button></div>`;
   } else if (isNow) {
-    left = heroFree(f);
+    left = heroFree(f, { heart: true });
   } else {
     const future = p.start > today();
     left = `<span class="lbl">${future ? 'Begroot over' : 'Over in deze periode'}</span><span class="big">${eur(future ? budgetFor(p).plannedLeft : fl.income - fl.spent - fl.saved)}</span><span class="sub">${future ? 'Verwacht salaris min alles wat gepland is' : 'Ontvangen min uitgegeven en gespaard'}</span>`;
   }
   const duo = isNow && true && true && kids().length;
   const adv = duo && true ? kids().map(k => ({ k, v: kidAdvance(k), own: kidOwnAcc(k) })).filter(x => x.v > 0 && x.own) : [];
-  const hero = duo ? `<div class="hero-duo"><div class="hero-main${f.ok ? ' hz' : ''}">${f.ok ? heroFree(f, { title: 'Vrij te besteden ' + (C().ownerName || 'jij'), extraTag: adv.map(x => `<button type="button" class="tag" data-go="kind" title="Betaald voor ${E(x.k.name)} en nog niet teruggehaald van ${E(x.own.name)}">Voorgeschoten voor ${E(x.k.name)} <b>${eur(x.v)}</b></button>`).join('') }) : left}</div>${kidHeroes()}</div>${figs}`
+  const hero = duo ? `<div class="hero-duo"><div class="hero-main${f.ok ? ' hz' : ''}">${f.ok ? heroFree(f, { heart: true, title: 'Vrij te besteden ' + (C().ownerName || 'jij'), extraTag: adv.map(x => `<button type="button" class="tag" data-go="kind" title="Betaald voor ${E(x.k.name)} en nog niet teruggehaald van ${E(x.own.name)}">Voorgeschoten voor ${E(x.k.name)} <b>${eur(x.v)}</b></button>`).join('') }) : left}</div>${kidHeroes()}</div>${figs}`
     : `<div class="hero-main${isNow && f.ok ? ' hz' : ''}">${left}</div>${figs}`;
 
   const cats = Object.entries(fl.cats).filter(([, v]) => v > 0.004).sort((a, c) => c[1] - a[1]);
@@ -5098,6 +5106,26 @@ ACT.linkExtra = el => {
     return head('Inkomsten', btn(icon('plus') + 'Inkomst', 'newIncome', '', 'primary')) + `<div class="toolbar">${seg}</div>` + incomeOverview();
   };
 }
+
+/* ================= Budget voor liefkie (verstopt) =================
+   Een heel klein hartje rechtsonder in "Vrij te besteden". Tikken: een bedrag reserveren als gewone reservering
+   "Budget voor liefkie" (telt dus meteen mee in Reserveringen en gaat van Vrij te besteden af), of met het prullenbakje
+   een eerder bedrag weer weghalen (uit Reserveringen én uit Vrij te besteden). */
+IC.trash = '<path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>';
+const LF_NAME = 'Budget voor liefkie';
+const lfList = () => all('reservations').filter(r => r.liefkie && resOpenRaw(r) > 0).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+const lfDelOps = r => [{ col: 'reservations', id: r.id, data: null }, ...all('transactions').filter(t => t.reservationId === r.id || (t.reservationIds || []).includes(r.id)).map(t => {
+  const ids = (t.reservationIds || []).filter(x => x !== r.id); return { col: 'transactions', id: t.id, data: { ...t, reservationId: t.reservationId === r.id ? (ids[0] || null) : t.reservationId, reservationIds: ids.length ? ids : null } }; })];
+ACT.liefkie = () => {
+  const xs = lfList();
+  const list = xs.length ? `<div class="list lf-list">${xs.map(r => `<div class="li"><span class="grow"><b>${eur(resOpen(r))}</b><span class="tsub">${fmtShort(r.date)}${r.note ? ' · ' + E(r.note) : ''}</span></span><button type="button" class="iconbtn lf-del" data-arm="lfDel" data-id="${E(r.id)}" aria-label="Weghalen" title="Weghalen">${icon('trash')}</button></div>`).join('')}</div>` : '';
+  openSheet({ title: 'Budget voor liefkie 💛', body: `${list}<p class="small muted" style="margin:${xs.length ? '12px' : '0'} 0 10px">Hoeveel is liefkie je waard? Het bedrag komt bij Reserveringen en gaat meteen van je Vrij te besteden af.</p>
+    <div class="grid2">${F.money('amount', 'Bedrag', '', { req: 1 })}${F.date('date', 'Wanneer', today())}${F.text('note', 'Waarvoor (mag leeg)', '', { cls: 'span2' })}</div>`,
+    submit: 'Reserveren',
+    actions: { lfDel: async el => { const r = S.reservations.get(el.dataset.id); if (r) await commit(LF_NAME + ' weggehaald', lfDelOps(r)); } },
+    onSubmit: v => { if (!(v.amount > 0)) throw new Error('Vul een bedrag in. Liefkie is vast meer dan € 0 waard 🥺'); if (!v.date) throw new Error('Kies een datum.');
+      return commit(LF_NAME + ' gereserveerd 💛', [{ col: 'reservations', id: uid('res'), data: { name: LF_NAME, type: 'Reservering', date: v.date, amount: r2(v.amount), paid: 0, status: 'Gereserveerd', note: v.note || '', liefkie: true } }]); } });
+};
 
 /* ================= start ================= */
 readHash();
