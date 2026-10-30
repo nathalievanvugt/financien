@@ -820,8 +820,10 @@ html{scrollbar-gutter:stable}
 .cao .tsub button.cao-ex{display:inline;text-decoration:underline dotted}
 /* the little hidden heart (Budget voor liefkie) */
 .hero-main.hz{position:relative}
-.lf-heart{position:absolute;right:12px;bottom:10px;width:20px;height:20px;padding:0;border:0;background:none;cursor:pointer;color:var(--ink-3);opacity:.28;display:grid;place-items:center;z-index:1}
-.lf-heart svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+.lf-heart{position:absolute;right:12px;bottom:10px;width:22px;height:22px;padding:0;border:0;background:none;cursor:pointer;color:var(--ink-3);opacity:.5;display:grid;place-items:center;z-index:1}
+.lf-heart svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2}
+:root[data-theme="dark"] .lf-heart{opacity:.7;color:color-mix(in srgb,var(--sys-pink) 45%,var(--ink-3))}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .lf-heart{opacity:.7;color:color-mix(in srgb,var(--sys-pink) 45%,var(--ink-3))}}
 .lf-heart:hover,.lf-heart:focus-visible{opacity:1;color:var(--sys-pink)}
 .lf-list .li{padding-block:8px}
 .lf-del svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -5117,14 +5119,14 @@ const lfList = () => all('reservations').filter(r => r.liefkie && resOpenRaw(r) 
 const lfDelOps = r => [{ col: 'reservations', id: r.id, data: null }, ...all('transactions').filter(t => t.reservationId === r.id || (t.reservationIds || []).includes(r.id)).map(t => {
   const ids = (t.reservationIds || []).filter(x => x !== r.id); return { col: 'transactions', id: t.id, data: { ...t, reservationId: t.reservationId === r.id ? (ids[0] || null) : t.reservationId, reservationIds: ids.length ? ids : null } }; })];
 ACT.liefkie = () => {
-  const xs = lfList();
-  const list = xs.length ? `<div class="list lf-list">${xs.map(r => `<div class="li"><span class="grow"><b>${eur(resOpen(r))}</b><span class="tsub">${fmtShort(r.date)}${r.note ? ' · ' + E(r.note) : ''}</span></span><button type="button" class="iconbtn lf-del" data-arm="lfDel" data-id="${E(r.id)}" aria-label="Weghalen" title="Weghalen">${icon('trash')}</button></div>`).join('')}</div>` : '';
-  openSheet({ title: 'Budget voor liefkie 💛', body: `${list}<p class="small muted" style="margin:${xs.length ? '12px' : '0'} 0 10px">Hoeveel is liefkie je waard? Het bedrag komt bij Reserveringen en gaat meteen van je Vrij te besteden af.</p>
-    <div class="grid2">${F.money('amount', 'Bedrag', '', { req: 1 })}${F.date('date', 'Wanneer', today())}${F.text('note', 'Waarvoor (mag leeg)', '', { cls: 'span2' })}</div>`,
+  const xs = lfList(), P = periodOf(today()), mn = MONTHS[+P.end.slice(5, 7) - 1], pl = `${fmtShort(P.start)} – ${fmtShort(P.end)}`;
+  const list = xs.length ? `<div class="list lf-list">${xs.map(r => { const rp = periodOf(r.date); return `<div class="li"><span class="grow"><b>${eur(resOpen(r))}</b><span class="tsub">budget voor ${MONTHS[+rp.end.slice(5, 7) - 1]} (${fmtShort(rp.start)} – ${fmtShort(rp.end)})${r.note ? ' · ' + E(r.note) : ''}</span></span><button type="button" class="iconbtn lf-del" data-arm="lfDel" data-id="${E(r.id)}" aria-label="Weghalen" title="Weghalen">${icon('trash')}</button></div>`; }).join('')}</div>` : '';
+  openSheet({ title: 'Budget voor liefkie 💛', body: `${list}<p style="margin:${xs.length ? '14px' : '0'} 0 4px"><b>Hoeveel is liefkie je waard deze maand?</b></p><p class="small muted" style="margin:0 0 10px">Dit is je budget voor liefkie voor ${mn} (${pl}). Het bedrag komt bij Reserveringen en gaat meteen van je Vrij te besteden voor ${mn} af.</p>
+    <div class="grid2">${F.money('amount', 'Budget voor ' + mn, '', { req: 1 })}${F.text('note', 'Waarvoor (mag leeg)', '')}</div>`,
     submit: 'Reserveren',
     actions: { lfDel: async el => { const r = S.reservations.get(el.dataset.id); if (r) await commit(LF_NAME + ' weggehaald', lfDelOps(r)); } },
-    onSubmit: v => { if (!(v.amount > 0)) throw new Error('Vul een bedrag in. Liefkie is vast meer dan € 0 waard 🥺'); if (!v.date) throw new Error('Kies een datum.');
-      return commit(LF_NAME + ' gereserveerd 💛', [{ col: 'reservations', id: uid('res'), data: { name: LF_NAME, type: 'Reservering', date: v.date, amount: r2(v.amount), paid: 0, status: 'Gereserveerd', note: v.note || '', liefkie: true } }]); } });
+    onSubmit: v => { if (!(v.amount > 0)) throw new Error('Vul een bedrag in. Liefkie is vast meer dan € 0 waard 🥺');
+      return commit(`${LF_NAME} ${mn} gereserveerd 💛`, [{ col: 'reservations', id: uid('res'), data: { name: `${LF_NAME} ${mn}`, type: 'Reservering', date: today(), amount: r2(v.amount), paid: 0, status: 'Gereserveerd', note: v.note || '', liefkie: true } }]); } });
 };
 
 /* ================= start ================= */
