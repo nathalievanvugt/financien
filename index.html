@@ -837,6 +837,13 @@ html{scrollbar-gutter:stable}
 .sal-set .card-h .row{flex-wrap:wrap;justify-content:flex-end}
 .hz-sal{margin-top:8px;font-size:.84rem;color:var(--ink-3);line-height:1.4}
 
+/* ⓘ: explanation behind a small button (31-10-2026) */
+.ib{display:inline-grid;place-items:center;width:18px;height:18px;margin-left:6px;padding:0;border-radius:50%;border:1px solid var(--line);background:transparent;color:var(--ink-2);font:600 11px/1 ui-serif,Georgia,serif;font-style:italic;vertical-align:middle;cursor:pointer;flex:none}
+.ib::before{content:"i"}
+.ib:hover,.ib[aria-expanded="true"]{color:var(--sys-blue);border-color:currentColor}
+.tipbox{margin:8px 0 10px;padding:10px 12px;border-radius:10px;background:var(--surface-2);border:1px solid var(--line);font-size:13px;line-height:1.45;color:var(--ink-2)}
+.tipbox p{margin:0}.tipbox p+p{margin-top:6px}
+
 </style>
 <div class="shell">
   <aside class="rail">
@@ -1230,7 +1237,7 @@ function fixedPayment(f, due) {
     const ds = [-1, 0, 1].map(n => fixedDue(f, addMonths(mk, n))).filter(Boolean);return ds.reduce((b, d) => Math.abs(diffDays(t.date, d)) < Math.abs(diffDays(t.date, b)) ? d : b, due) === due;
   };
   const tx = activeTx().filter(t => t.fixedId === f.id && Math.abs(diffDays(t.date, due)) <= 20 && near(t)).sort((a, b) => Math.abs(diffDays(a.date, due)) - Math.abs(diffDays(b.date, due)))[0];
-  if (tx) return { paid: true, tx, amount: -tx.amount };
+  if (tx) return { paid: true, tx, amount: Math.abs(+tx.amount) }; // also a withdrawal from the child's account linked to his fixed cost
   if (f.paidMonths && f.paidMonths[mk]) return { paid: true, manual: true, amount: f.amount };
   if (cs && due <= cs) return { paid: true, settled: true, amount: f.amount };
   return { paid: false };
@@ -1575,6 +1582,9 @@ function findDuplicate(row, accountId, cls) {
   const txs = all('transactions');
   const same = txs.find(t => t.accountId === accountId && t.date === row.date && Math.abs(t.amount - row.amount) < 0.005 && (norm(t.name).slice(0, 6) === norm(row.name).slice(0, 6) || !row.name));
   if (same) return { level: 'dup', text: 'Staat er al in', tx: same };
+  // a salary added by hand with "+ Salaris" (31-10-2026): the bank booking is the same salary
+  if (+row.amount > 0) { const man = txs.find(t => t.salManual && t.status !== 'ignored' && t.accountId === accountId && Math.abs(diffDays(t.date, row.date)) <= 5 && Math.abs(+t.amount - row.amount) <= Math.max(1, +t.amount * 0.02));
+    if (man) return { level: 'dup', text: 'Salaris staat er al in (met de hand)', tx: man }; }
   const mirror = txs.find(t => t.toAccountId === accountId && Math.abs(t.amount + row.amount) < 0.005 && Math.abs(diffDays(t.date, row.date)) <= 3);
   if (mirror) return { level: 'dup', text: 'Al verwerkt als overboeking' };
   // the same transfer already booked from the other side (e.g. creditcard incasso seen on the card and on the bank)
@@ -1818,6 +1828,7 @@ function render(force) {
   v.innerHTML = html;
   const ph = v.querySelector(':scope > .pagehead');
   if (ph) { let at = ph; for (const n of [...v.children]) { if (n === ph) break; if (n.classList.contains('notice')) { at.after(n); at = n; } } }
+  tipify(v);
   groceryAuto();
   makeKeyboardable(v);
   VIEWS_AFTER[page.id]?.();
@@ -1876,6 +1887,7 @@ function openSheet({ title, body, submit = 'Opslaan', onSubmit, extraFoot = '', 
   form.addEventListener('change', () => applyWhen(form));
   form.addEventListener('input', e => SHEET?.actions?.input?.(e, form));
   applyWhen(form);
+  tipify(d);
   makeKeyboardable(d);
   if (!d.open) d.showModal();
   onOpen?.(form);
@@ -1973,6 +1985,26 @@ document.addEventListener('input', e => {
   if (!h) { h = document.createElement('span'); h.className = 'money-hint'; el.after(h); }
   h.textContent = '= ' + eur(parseAmount(el.value));
 });
+
+/* 31-10-2026: less text. Explanations (a muted paragraph of some length) go behind a small ⓘ next to the title of their card, sheet or page;
+   tapping it shows the text. Labels, amounts and buttons stay. A paragraph with class "keep" stays where it is. */
+const TIP_MIN = 40;
+function tipify(root) {
+  const ps = [...root.querySelectorAll('p.small.muted, p.muted.small, p.hint, .hz-sal')].filter(p => !p.closest('.tipbox') && !p.classList.contains('keep') && (p.textContent || '').trim().length >= TIP_MIN)
+    // a description under a card title (e.g. "Saldo en soort per rekening") is explanation too
+    .concat([...root.querySelectorAll('.card-h h2 + p:not(.num), .card-h h3 + p:not(.num)')].filter(p => !p.closest('.tipbox') && !p.classList.contains('keep') && !p.querySelector('button, b, .pos')));
+  const groups = new Map();
+  for (const p of ps) { const box = p.closest('.card, .hero-main, .sheet-in, #view') || root; if (!groups.has(box)) groups.set(box, []); groups.get(box).push(p); }
+  for (const [box, list] of groups) {
+    const head = box.matches('.sheet-in') ? box.querySelector('.sheet-h h2') : box.matches('#view') ? box.querySelector('.pagehead h1') : box.querySelector(':scope > .card-h h2, :scope > .card-h h3, .card-h h2, .hz-eyebrow, .tw-k, h2, h3');
+    const tip = document.createElement('div'); tip.className = 'tipbox'; tip.hidden = true;
+    list.forEach(p => { p.classList.remove('small', 'muted', 'hz-sal'); p.style.margin = ''; tip.appendChild(p); });
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'ib'; b.setAttribute('aria-label', 'Uitleg'); b.setAttribute('aria-expanded', 'false'); b.title = 'Uitleg';
+    b.addEventListener('click', e => { e.stopPropagation(); e.preventDefault(); tip.hidden = !tip.hidden; b.setAttribute('aria-expanded', String(!tip.hidden)); });
+    if (head) { head.appendChild(b); const hb = head.closest('.card-h, .sheet-h, .pagehead') || head; (box.matches('.sheet-in') ? box.querySelector('.sheet-b') : null)?.prepend(tip) ?? (hb.parentNode === box || box.contains(hb) ? hb.after(tip) : box.prepend(tip)); }
+    else { box.prepend(tip); box.prepend(b); }
+  }
+}
 
 function donut(entries, total) {
   const R = 58, SW = 13, CIRC = 2 * Math.PI * R, gap = entries.length > 1 ? 5 : 0; let off = 0;
@@ -2162,7 +2194,7 @@ function txForm(t) {
     ${F.date('date', 'Datum', t.date, { req: 1 })}${F.money('amount', 'Bedrag (min = af)', t.amount, { req: 1, ph: '-12,50' })}
     ${F.text('name', 'Omschrijving', t.name, { req: 1, cls: 'span2' })}
     ${F.select('accountId', 'Rekening', t.accountId, accOpts('— kies —'))}${F.select('kind', 'Soort', t.kind, KINDS)}
-    ${typeof CAT_IN !== 'undefined' ? F.select('catIn', 'Categorie', catNorm('inkomst', t.category), CAT_IN, { when: 'kind=inkomst' }) + F.select('catOut', 'Categorie', catNorm('uitgave', t.category), CAT_OUT, { when: 'kind=uitgave' }) + (kids().length && true ? kidMoveField(t) : '') + (kids().length && true ? kidSelFields(t) : '')
+    ${typeof CAT_IN !== 'undefined' ? F.select('catIn', 'Categorie', catNorm('inkomst', t.category), CAT_IN, { when: 'kind=inkomst' }) + F.select('catOut', 'Categorie', catNorm('uitgave', t.category), CAT_OUT, { when: 'kind=uitgave' }) + (kids().length && true ? kidMoveField(t) + kidTrSelField(t) : '') + (kids().length && true ? kidSelFields(t) : '')
       : F.select('category', 'Categorie', t.category, [...new Set([...cats, t.category].filter(Boolean))], { when: 'kind=uitgave|inkomst' })}
     ${txKid(t) ? kidPartyField(t) : ''}
     ${F.select('toAccountId', 'Naar of van eigen rekening', t.toAccountId || '', accOpts(), { when: 'kind=overboeking|sparen' })}
@@ -2194,7 +2226,7 @@ function txForm(t) {
       if (doc.fixedId && (doc.category === 'Overig' || !doc.category)) { const f = S.fixed.get(doc.fixedId); doc.category = f?.kind === 'maand' ? 'Vaste lasten' : 'Abonnementen'; }
       if (doc.reservationId && doc.category === 'Overig') doc.category = 'Reserveringen';
       let moveOps = [];
-      if (v.kidMove !== undefined) { const m = kidMoveApply(doc, t.id ? t : null, !!v.kidMove); Object.assign(doc, m.doc); moveOps = m.ops; }
+      if (v.kidMove !== undefined) { const m = kidMoveApply(doc, t.id ? t : null, !!v.kidMove); Object.assign(doc, m.doc); moveOps = m.ops; if (v.kidMove && v.kidSelTr !== undefined) Object.assign(doc, kidTrSelApply(doc, v.kidSelTr, v.kidTitle)); }
       if ((v.kind === 'uitgave' || v.kind === 'inkomst') && kids().length && !v.kidMove) {
         const sv = v.kind === 'uitgave' ? v.kidSelOut : v.kidSelIn;
         if (sv === 'newfx') { await commit(isNew ? `${doc.name} toegevoegd` : `${doc.name} opgeslagen`, [{ col: 'transactions', id, data: { ...doc, fixedId: null } }]); return txAddFixed(S.transactions.get(id), v.kidFreq || 'maand', true); }
@@ -2436,11 +2468,7 @@ function fixedForm(f, preset = {}) {
 const resPill = r => { if (r.skip && resOpenRaw(r) > 0) return pill('Telt niet mee'); const st = resOpen(r) === 0 && r.status !== 'Opzij gezet' ? 'Betaald' : r.status; return pill(st, st === 'Betaald' ? 'ok' : st === 'Opzij gezet' ? 'save' : st === 'Opzij zetten' ? 'warn' : 'res'); };
 VIEWS.reserveringen = () => {
   const rs = all('reservations').sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.name.localeCompare(b.name));
-  const open = rs.filter(r => resOpen(r) > 0);
-  const recent = periodOf(addDays(periodOf(today()).start, -1)).start;
-  const paidRecently = new Set(activeTx().filter(t => t.date >= recent).flatMap(t => txResIds(t)));
-  const cur = rs.filter(r => resOpenRaw(r) > 0 || (r.date && r.date >= recent) || paidRecently.has(r.id));
-  const list = UI.resView === 'open' ? cur : rs.slice().reverse();
+  const list = rs; // 31-10-2026: no summary or Actueel/Alles any more; every month shows all its reservations
   const byM = {};
   list.forEach(r => { const k = r.date ? monthKey(r.date) : 'zonder'; (byM[k] = byM[k] || []).push(r); }); // per calendar month (31-10-2026)
   const resHead = k => {
@@ -2462,25 +2490,11 @@ VIEWS.reserveringen = () => {
   const prevBtn = prevHidden.length || UI.resPrev ? `<div class="inc-more res-prev">${prevHidden.length ? `<button type="button" class="btn" data-act="resPrevMore">${UI.resPrev ? 'Nog eerdere maanden' : 'Eerdere maanden'}${prevOpen ? ` (${prevOpen} met nog open)` : ''}</button>` : ''}${UI.resPrev ? '<button type="button" class="btn ghost" data-act="resPrevHide">Verbergen</button>' : ''}</div>` : '';
   const cards = prevBtn + (prevShown.length ? prevShown.slice().reverse().map(cardOf).join('') + `<h3 class="xh" style="margin:0 0 -8px">Vanaf deze maand</h3>` : '') + main.map(cardOf).join('');
   return head('Reserveringen', btn(icon('plus') + 'Reservering', 'newRes', '', 'primary')) +
-    (() => { const p = periodOf(today()), inPer = open.filter(r => r.date && r.date <= p.end), later = open.filter(r => !r.date || r.date > p.end);
-      const pick = ([w, l, list]) => { const sk = rs.filter(r => r.skip && resOpenRaw(r) > 0 && (w === 'now' ? r.date && r.date <= p.end : !r.date || r.date > p.end)).length; return `<button type="button" class="tag" data-act="resPick" data-w="${w}">${l} <b>${eur(sum(list, resOpen))}</b> · ${list.length} ${list.length === 1 ? 'post' : 'posten'}${sk ? ` · ${sk} uitgevinkt` : ''}</button>`; };
-      return topCard({ ic: 'reserveringen', label: 'Openstaand', amount: eur(sum(open, resOpen)), tags: [['now', 'Tot je volgende salaris', inPer], ['later', 'Daarna', later]].map(pick).join(''),
-        foot: `<div class="seg"><button type="button" data-act="resv" data-v="open" aria-pressed="${UI.resView === 'open'}">Actueel · ${cur.length}</button><button type="button" data-act="resv" data-v="all" aria-pressed="${UI.resView === 'all'}">Alles · ${rs.length}</button></div>` }); })() +
-    (cards || `<div class="card">${emptyState(UI.resView === 'open' ? 'Niets open' : 'Nog geen reserveringen', 'Reserveer geld voor grotere uitgaven en terugbetalingen.')}</div>`);
+    cards;
 };
 ACT.newResIn = el => { const mk = el.dataset.mk, T = today(); resForm(null, { date: mk === monthKey(T) ? periodOf(T).end < dateIn(mk, 31) ? periodOf(T).end : dateIn(mk, 31) : dateIn(mk, 1) }); };
 ACT.resPrevMore = () => { UI.resPrev = (UI.resPrev || 0) + 3; render(); };
 ACT.resPrevHide = () => { UI.resPrev = 0; render(); };
-ACT.resPick = el => {
-  const p = periodOf(today()), now = el.dataset.w === 'now';
-  const list = all('reservations').filter(r => resOpenRaw(r) > 0 && (now ? r.date && r.date <= p.end : !r.date || r.date > p.end)).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
-  openSheet({ title: now ? 'Tot je volgende salaris' : 'Na je volgende salaris',
-    body: list.length ? `<p class="small muted" style="margin-bottom:6px">Vink uit wat je niet wilt meetellen. Dat past ook Vrij te besteden en de begroting op het dashboard aan.</p><div class="list pick-list">${list.map(r => `<label class="li pick"><input type="checkbox" name="inc[]" value="${E(r.id)}" ${r.skip ? '' : 'checked'}>${resIcon(r)}<span class="grow"><b>${E(r.name)}</b><span class="tsub">${r.date ? fmtShort(r.date) : 'Zonder datum'}${r.note ? ' · ' + E(r.note) : ''}</span></span><span class="amt">${eur(resOpenRaw(r))}</span></label>`).join('')}</div><div class="spread pick-tot"><span>Telt mee</span><b id="pickTot"></b></div>` : emptyState('Niets open', 'Er staan hier geen openstaande reserveringen.'),
-    onOpen: form => { const upd = () => { const ids = new Set([...form.querySelectorAll('input[name="inc[]"]:checked')].map(x => x.value)); const t = $('#pickTot'); if (t) t.textContent = eur(sum(list.filter(r => ids.has(r.id)), resOpenRaw)); }; form.addEventListener('change', upd); upd(); },
-    onSubmit: v => { const on = new Set(v.inc || []); const ops = list.filter(r => !!r.skip === on.has(r.id)).map(r => ({ col: 'reservations', id: r.id, data: { ...r, skip: !on.has(r.id) } }));
-      return ops.length ? commit('Reserveringen bijgewerkt', ops) : null; } });
-};
-ACT.resv = el => { UI.resView = el.dataset.v; render(); };
 ACT.newRes = () => resForm(null);
 ACT.editRes = el => resForm(S.reservations.get(el.dataset.id));
 /* repeat a new reservation: [key, label, days, months] */
@@ -2511,8 +2525,8 @@ function resForm(r, preset = {}) {
         + F.date('until', 'Tot en met', '', { when: 'dur=until' }) + F.num('times', 'Hoeveel keer in totaal', 12, { step: 1, when: 'dur=times' }) : ''}</div>
       ${!isNew && r.series ? (() => { const sr = resSeries().find(x => x.id === r.series); return sr ? `<div class="notice info" style="margin-top:10px"><span>Hoort bij een reeks: ${(RES_REPEAT.find(x => x[0] === sr.rep) || RES_REPEAT[2])[1].toLowerCase()}, ${sr.until ? 'tot en met ' + fmtShort(sr.until) : 'doorlopend'}.</span><button type="button" class="btn sm" data-arm="seriesStop">Stoppen vanaf deze</button></div>` : ''; })() : ''}
       <p class="small muted" style="margin-top:6px">De datum bepaalt in welke periode het bedrag meetelt bij Vrij te besteden.</p>
-      <details class="res-more"${!isNew && (r.status !== 'Gereserveerd' || +r.paid > 0 || r.note || r.type !== 'Reservering') ? ' open' : ''}><summary>Meer: status, al betaald, notitie</summary>
-      <div class="grid2" style="margin-top:10px">${F.select('status', 'Status', r.status, RES_STATUSES)}${F.money('paid', 'Al betaald', r.paid)}${F.select('type', 'Soort', r.type, ['Reservering', 'Aflossing'])}
+      <details class="res-more"${!isNew && (r.status !== 'Gereserveerd' || +r.paid > 0 || r.note || r.type !== 'Reservering' || r.skip) ? ' open' : ''}><summary>Meer: status, al betaald, notitie</summary>
+      <div class="grid2" style="margin-top:10px">${F.check('count', 'Telt mee in Vrij te besteden', !r.skip, { cls: 'span2' })}${F.select('status', 'Status', r.status, RES_STATUSES)}${F.money('paid', 'Al betaald', r.paid)}${F.select('type', 'Soort', r.type, ['Reservering', 'Aflossing'])}
       ${F.area('note', 'Notitie', r.note)}</div>
       <p class="small muted">Gereserveerd telt mee bij Vrij te besteden. Opzij gezet staat al op een andere rekening en telt niet meer mee. Betaald is klaar.</p></details>
       ${linked.length ? `<div><h3 style="margin-bottom:4px">Gekoppelde betalingen</h3>${linked.map(t => `<div class="cand"><span>${fmtD(t.date)} · ${E(t.name)}</span><span class="num">${eur(-t.amount)}</span><button type="button" class="btn sm ghost" data-act="unlinkRes" data-tx="${E(t.id)}">Ontkoppelen</button></div>`).join('')}</div>` : ''}
@@ -2526,7 +2540,7 @@ function resForm(r, preset = {}) {
       unlinkRes: async b => { const t = S.transactions.get(b.dataset.tx); closeSheet(); const rest = txResIds(t).filter(id => id !== r.id); await commit(`${t.name} ontkoppeld`, [{ col: 'transactions', id: t.id, data: { ...t, reservationId: rest[0] || null, reservationIds: rest.length > 1 ? rest : null, category: rest.length ? t.category : t.kind === 'uitgave' ? 'Overig' : t.category } }, ...resRelinkOps(t, rest)]); } },
     onSubmit: async v => {
       if (!isFinite(v.amount)) throw new Error('Vul een geldig bedrag in.');
-      const base = { ...r, name: v.name, type: v.type, date: v.date, amount: r2(v.amount), paid: v.status === 'Betaald' ? r2(v.amount) : r2(v.paid || 0), status: v.status, deadline: v.date, note: v.note };
+      const base = { ...r, skip: v.count === false ? true : false, name: v.name, type: v.type, date: v.date, amount: r2(v.amount), paid: v.status === 'Betaald' ? r2(v.amount) : r2(v.paid || 0), status: v.status, deadline: v.date, note: v.note };
       const rep = isNew ? RES_REPEAT.find(x => x[0] === v.repeat) || RES_REPEAT[0] : RES_REPEAT[0], dur = rep[0] === 'once' ? 'once' : v.dur || 'forever';
       if (dur === 'forever') { // a series: its reservations are made ahead and keep coming
         const sid = uid('s').replace(/^s-/, ''), sr = { id: sid, name: v.name, amount: base.amount, type: v.type, note: v.note || '', rep: rep[0], start: v.date, until: null, skip: [] };
@@ -2703,13 +2717,6 @@ ACT.undoExtra = el => {
   if (old && isAppMadeExtraTx(old)) ops.push({ col: 'transactions', id: transactionId, data: null });
   return commit(`${x.name} weer op verwacht`, ops);
 };
-/* the calculation tab of Inkomsten; the overview tab is drawn in views12 */
-const salCalcView = () => {
-  const seg = `<div class="seg"><button type="button" data-act="salTab" data-v="overzicht" aria-pressed="${UI.salTab === 'overzicht'}">Overzicht</button><button type="button" data-act="salTab" data-v="calc" aria-pressed="${UI.salTab === 'calc'}">Calculator</button></div>`;
-  const h = head('Inkomsten', btn(icon('plus') + 'Inkomst', 'newIncome', '', 'primary')) + `<div class="toolbar">${seg}</div>`;
-  return h + caoCard();
-};
-ACT.salTab = el => { UI.salTab = el.dataset.v; render(); };
 ACT.editSalary = (el, e) => { if (e?.target?.closest('[data-stop]')) return; salaryForm(S.salaries.get(el.dataset.id)); };
 function salaryForm(s, prefill = {}) {
   const isNew = !s;
@@ -2821,100 +2828,6 @@ function carExtraForm(x) {
     onSubmit: async v => { if (!isFinite(v.amount)) throw new Error('Vul het bedrag in.'); await put('carExtra', { ...x, ...v, amount: r2(v.amount) }, `${v.name} opgeslagen`); } });
 }
 
-/* ================= Salaris volgens de cao (calculator-tab) =================
-   Arjan vult zijn bruto maandsalaris in en de maand waarin dat gold. Elke cao-verhoging (percentage vanaf een maand)
-   komt daar bovenop, de een na de ander. Extra uitkeringen: een percentage van het salaris van de 12 maanden tot en met
-   de maand van uitbetaling (eindejaarsuitkering, vakantietoeslag), of een vast bedrag (eenmalige uitkering, naar rato
-   van de deeltijd). Alles bruto; het telt niet mee in de andere berekeningen van de app. */
-const CAO_DEFAULT = () => ({
-  base: +C().salary.fixedGross || null, baseFrom: '2026-06', parttime: 100,
-  raises: [{ id: 'r-2026-07', pct: 4, from: '2026-07', note: 'cao mbo 2026-2028' }, { id: 'r-2027-01', pct: 3, from: '2027-01', note: 'cao mbo 2026-2028' }],
-  extras: [
-    { id: 'x-eju', name: 'Eindejaarsuitkering', kind: 'pct', value: 8.33, month: 12, once: null },
-    { id: 'x-vak', name: 'Vakantietoeslag', kind: 'pct', value: 8, month: 5, once: null },
-    { id: 'x-eenmalig', name: 'Eenmalige uitkering cao', kind: 'eur', value: 1700, month: 11, once: 2026, rato: true },
-  ],
-});
-/* the one-off cao payment is paid in November (was set to July at first; changed unless Arjan set it himself) */
-const caoCfg = () => { const c = C().cao; if (!c) return CAO_DEFAULT(); return { ...c, base: +c.base > 0 ? c.base : (+C().salary.fixedGross || null), extras: (c.extras || []).map(x => x.id === 'x-eenmalig' && !x.edited && +x.month === 7 ? { ...x, month: 11 } : x) }; };
-/* gross salary in month mk: the base, with every raise from after the base month up to and including mk */
-function caoSalary(c, mk) {
-  if (!(+c.base > 0)) return 0;
-  let v = +c.base;
-  for (const r of (c.raises || []).slice().sort((a, b) => a.from.localeCompare(b.from) || (b.kind === 'eur') - (a.kind === 'eur'))) if (r.from > c.baseFrom && r.from <= mk) v = r.kind === 'eur' ? v + (+r.amount || 0) : v * (1 + (+r.pct || 0) / 100);
-  return r2(v);
-}
-/* what an extra pays in month mk (0 when it is not paid that month) */
-function caoExtra(c, x, mk) {
-  const y = +mk.slice(0, 4), m = +mk.slice(5, 7);
-  if (m !== +x.month || (x.once && +x.once !== y)) return 0;
-  if (x.kind === 'eur') return r2((+x.value || 0) * (x.rato ? (+c.parttime || 100) / 100 : 1));
-  let tot = 0; for (let i = 0; i < 12; i++) tot += caoSalary(c, addMonths(mk, -i));
-  return r2(tot * (+x.value || 0) / 100);
-}
-function caoYear(c, y) {
-  return Array.from({ length: 12 }, (_, i) => { const mk = `${y}-${String(i + 1).padStart(2, '0')}`, sal = caoSalary(c, mk);
-    const ex = (c.extras || []).map(x => ({ x, v: caoExtra(c, x, mk) })).filter(e => e.v > 0);
-    const raise = (c.raises || []).filter(r => r.from === mk && r.from > c.baseFrom);
-    return { mk, sal, ex, raise, tot: r2(sal + sum(ex, e => e.v)) }; });
-}
-/* netto as a share of bruto: from the salary set above (netto / bruto), otherwise the percentage set there */
-const caoNetPct = () => { const sa = salaryAt(nextPayDates(1)[0]); return sa.net > 0 && sa.gross > 0 ? Math.round(sa.net / sa.gross * 10000) / 100 : Math.round((C().salary.fallbackFactor || 0.72) * 10000) / 100; };
-/* a percentage typed straight into a month of the table: add, change or (empty / 0) remove that month's raise */
-document.addEventListener('change', e => { const el = e.target; if (!el.matches?.('input[data-cao-mk]')) return;
-  const c = caoCfg(), mk = el.dataset.caoMk, v = el.value.trim() === '' ? 0 : parseFloat(el.value.replace(',', '.')), old = (c.raises || []).find(x => x.from === mk && x.kind !== 'eur');
-  if (!isFinite(v)) return toast('Vul een percentage in, bijvoorbeeld 2,5.');
-  const rest = (c.raises || []).filter(x => x !== old);
-  if (!v) { if (old) caoSave({ raises: rest }, 'Verhoging ' + MONTHS[+mk.slice(5) - 1] + ' weg'); return; }
-  caoSave({ raises: [...rest, { ...(old || { id: uid('r'), note: '' }), kind: 'pct', pct: v, amount: null, from: mk }] }, `+${nr(v, 2)}% vanaf ${MONTHS[+mk.slice(5) - 1]} ${mk.slice(0, 4)}`); });
-const caoRaiseTxt = r => r.kind === 'eur' ? '+' + eur(+r.amount) : '+' + nr(+r.pct, 2) + '%';
-function caoCard() {
-  const c = caoCfg();
-  const nowMk = monthKey(today());
-  // from this month up to December next year; a few months shown, the rest folds open. Netto = bruto × the percentage of the block above.
-  const ty = +today().slice(0, 4), from = nowMk, to = `${ty + 1}-12`, months = [];
-  for (let mk = from; mk <= to; mk = addMonths(mk, 1)) months.push(mk);
-  const yr = {}; const yRows = y => (yr[y] ||= caoYear(c, y)); const rowOf = mk => yRows(+mk.slice(0, 4))[+mk.slice(5) - 1];
-  const shown = UI.caoAll ? months : months.slice(0, 4), f = caoNetPct() / 100;
-  const row = mk => { const r = rowOf(mk), rs = (c.raises || []).filter(x => x.from === mk), pr = rs.find(x => x.kind !== 'eur'), tr = rs.filter(x => x.kind === 'eur');
-    const pctIn = `<label class="cao-pin" title="Verhoging in procenten vanaf deze maand"><input type="number" step="0.01" inputmode="decimal" data-cao-mk="${mk}" value="${pr ? +pr.pct : ''}" placeholder="0" aria-label="Verhoging vanaf ${MONTHS[+mk.slice(5) - 1]} ${mk.slice(0, 4)} in procenten"><span>%</span></label>`;
-    const trBtn = tr.map(x => `<button type="button" class="pill cao-pct on" data-act="caoRaise" data-id="${E(x.id)}" title="Trede wijzigen">${caoRaiseTxt(x)}</button>`).join('');
-    const exN = r.ex.length ? `<div class="tsub">incl. ${r.ex.map(e => `<button type="button" class="cao-ex" data-act="caoExtraEdit" data-id="${E(e.x.id)}">${E(e.x.name).toLowerCase()}</button>`).join(', ')}</div>` : '';
-    return `<tr${mk === nowMk ? ' class="cao-now"' : ''}><td><b class="hide-m">${cap(MONTHS[+mk.slice(5) - 1])} ${mk.slice(0, 4)}</b><b class="show-m">${cap(MONTHS[+mk.slice(5) - 1].slice(0, 3))} ’${mk.slice(2, 4)}</b>${mk === nowMk ? '<div class="tsub">nu</div>' : ''}</td><td class="num cao-pc">${pctIn}${trBtn}</td><td class="num hide-m">${r.sal ? eur(r.sal) : '—'}</td><td class="num hide-m">${r.ex.map(e => `<button type="button" class="cao-ex" data-act="caoExtraEdit" data-id="${E(e.x.id)}" title="Uitkering wijzigen">${eur(e.v)}<span class="tsub">${E(e.x.name)}</span></button>`).join('')}</td><td class="num"><b>${r.tot ? eur(r.tot) : '—'}</b><span class="show-m">${exN}</span></td><td class="num cao-net">${r.tot ? eur(r.tot * f) : '—'}</td></tr>`; };
-  const ys = [...new Set(months.map(mk => +mk.slice(0, 4)))].map(y => { const rr = yRows(y), sl = sum(rr, r => r.sal), ex = sum(rr, r => sum(r.ex, e => e.v)); return `<tr class="cao-tot"><td><b>${y}</b><div class="tsub">hele jaar</div></td><td></td><td class="num hide-m">${eur(sl)}</td><td class="num hide-m">${eur(ex)}</td><td class="num"><b>${eur(sl + ex)}</b></td><td class="num cao-net">${eur((sl + ex) * f)}</td></tr>`; }).join('');
-  const table = `<div class="tablewrap"><table><thead><tr><th>Maand</th><th class="num">Verhoging</th><th class="num hide-m">Salaris</th><th class="num hide-m">Extra</th><th class="num">Bruto<span class="hide-m"> totaal</span></th><th class="num">Netto ±</th></tr></thead><tbody>${shown.map(row).join('')}
-    ${months.length > 4 ? `<tr class="cao-more"><td colspan="6"><button type="button" class="link" data-act="caoAll">${UI.caoAll ? 'Minder maanden tonen' : `Alle maanden tonen (t/m december ${to.slice(0, 4)})`}</button></td></tr>` : ''}
-    ${ys}</tbody></table></div>`;
-  return `<div class="card cao"><div class="card-h"><h2>Salaris volgens de cao</h2><div class="row cao-btns"><button type="button" class="btn sm" data-act="caoRaise">+ Trede</button><button type="button" class="btn sm" data-act="caoExtraEdit">+ Uitkering</button><button type="button" class="btn sm" data-act="caoBase">Instellen</button></div></div>
-    ${table}</div>`;
-}
-const caoSave = (patch, label) => saveConfig({ cao: { ...caoCfg(), ...patch } }, label);
-const caoMonthFields = (mk, label) => `${F.select('m', label, String(+mk.slice(5, 7)), MONTHS.map((n, i) => [String(i + 1), cap(n)]))}${F.num('y', 'Jaar', +mk.slice(0, 4), { step: 1 })}`;
-const caoMk = v => { const y = Math.round(+v.y), m = Math.round(+v.m); if (!(y > 1999 && y < 2100) || !(m >= 1 && m <= 12)) throw new Error('Kies een geldige maand en een jaar.'); return `${y}-${String(m).padStart(2, '0')}`; };
-ACT.caoAll = () => { UI.caoAll = !UI.caoAll; render(); };
-ACT.caoBase = () => { const c = caoCfg();
-  openSheet({ title: 'Salaris instellen', body: `<div class="grid2">${F.money('base', 'Bruto maandsalaris', c.base, { req: 1 })}${F.num('parttime', 'Deeltijd (%)', c.parttime ?? 100, { step: 1 })}${caoMonthFields(c.baseFrom, 'Dit salaris kreeg je in')}</div>
-    <p class="small muted" style="margin-top:8px">Kies de maand van je loonstrook. Verhogingen tot en met die maand zitten al in dit bedrag; latere komen erbovenop. De deeltijd geldt alleen voor vaste bedragen die naar rato zijn, zoals de eenmalige uitkering.</p>`,
-    onSubmit: v => { if (!(v.base > 0)) throw new Error('Vul je bruto maandsalaris in.'); const pt = v.parttime == null ? 100 : +v.parttime; if (!(pt > 0 && pt <= 100)) throw new Error('Vul een deeltijd tussen 1 en 100% in.');
-      return caoSave({ base: r2(v.base), parttime: pt, baseFrom: caoMk(v) }, 'Salaris voor de cao-berekening'); } }); };
-ACT.caoRaise = el => { const c = caoCfg(), r = (c.raises || []).find(x => x.id === el.dataset.id), mk = r ? r.from : el.dataset.mk || addMonths(monthKey(today()), 1);
-  openSheet({ title: r ? 'Verhoging wijzigen' : 'Verhoging of trede toevoegen', body: `<div class="grid2">${F.select('kind', 'Soort', r?.kind === 'eur' ? 'eur' : 'pct', [['pct', 'Verhoging in procenten (cao)'], ['eur', 'Trede erbij (bedrag per maand)']], { cls: 'span2' })}${F.num('pct', 'Verhoging (%)', r && r.kind !== 'eur' ? r.pct : '', { when: 'kind=pct' })}${F.money('amount', 'Trede: zoveel bruto per maand erbij (€)', r?.kind === 'eur' ? r.amount : '', { when: 'kind=eur' })}${F.text('note', 'Omschrijving (mag leeg)', r?.note || '')}${caoMonthFields(mk, 'Vanaf')}</div>
-    <p class="small muted" style="margin-top:8px">Een trede is de stap naar het volgende bedrag in je salarisschaal (het verschil tussen de twee treden). Cao-verhogingen in procenten gaan daarna over het nieuwe bedrag.</p>`,
-    extraFoot: r ? '<button type="button" class="btn danger left" data-act="caoRaiseDel">Verwijderen</button>' : '',
-    actions: { caoRaiseDel: () => { closeSheet(); return caoSave({ raises: c.raises.filter(x => x.id !== r.id) }, 'Verhoging verwijderd'); } },
-    onSubmit: v => { const eurK = v.kind === 'eur'; if (eurK ? !(v.amount > 0) : (!isFinite(v.pct) || v.pct === 0)) throw new Error(eurK ? 'Vul het bedrag van de trede in.' : 'Vul een percentage in.'); const x = { id: r ? r.id : uid('r'), kind: eurK ? 'eur' : 'pct', pct: eurK ? null : +v.pct, amount: eurK ? r2(v.amount) : null, from: caoMk(v), note: v.note || '' };
-      return caoSave({ raises: [...(c.raises || []).filter(y => y.id !== x.id), x] }, r ? 'Gewijzigd' : (x.kind === 'eur' ? 'Trede toegevoegd' : 'Verhoging toegevoegd')); } }); };
-ACT.caoExtraEdit = el => { const c = caoCfg(), x = (c.extras || []).find(e => e.id === el.dataset.id);
-  openSheet({ title: x ? 'Uitkering wijzigen' : 'Uitkering toevoegen', body: `<div class="grid2">${F.text('name', 'Naam', x?.name || '', { req: 1, cls: 'span2' })}
-    ${F.select('kind', 'Soort', x?.kind || 'pct', [['pct', 'Percentage van het salaris'], ['eur', 'Vast bedrag']])}${F.num('value', 'Percentage of bedrag', x ? x.value : '', { req: 1 })}
-    ${F.select('m', 'Uitbetaald in', String(x?.month || 12), MONTHS.map((n, i) => [String(i + 1), cap(n)]))}${F.select('rep', 'Hoe vaak', x?.once ? 'once' : 'year', [['year', 'Elk jaar'], ['once', 'Eén keer']])}
-    ${F.num('y', 'In het jaar', x?.once || +today().slice(0, 4), { step: 1, when: 'rep=once' })}${F.check('rato', 'Naar rato van mijn deeltijd', x ? !!x.rato : false, { when: 'kind=eur' })}</div>
-    <p class="small muted" style="margin-top:8px">Een percentage telt over je salaris van de 12 maanden tot en met de maand van uitbetaling.</p>`,
-    extraFoot: x ? '<button type="button" class="btn danger left" data-act="caoExtraDel">Verwijderen</button>' : '',
-    actions: { caoExtraDel: () => { closeSheet(); return caoSave({ extras: c.extras.filter(e => e.id !== x.id) }, 'Uitkering verwijderd'); } },
-    onSubmit: v => { if (!isFinite(v.value) || !(v.value > 0)) throw new Error('Vul een percentage of bedrag in.'); const once = v.rep === 'once' ? Math.round(+v.y) : null; if (once != null && !(once > 1999 && once < 2100)) throw new Error('Vul een geldig jaar in.');
-      const n = { id: x ? x.id : uid('x'), edited: true, name: v.name, kind: v.kind === 'eur' ? 'eur' : 'pct', value: +v.value, month: +v.m, once, rato: v.kind === 'eur' && !!v.rato };
-      return caoSave({ extras: [...(c.extras || []).filter(e => e.id !== n.id), n] }, x ? 'Uitkering gewijzigd' : 'Uitkering toegevoegd'); } }); };
 
 /* ================= files and bank import ================= */
 const docUrl = d => { const u = d.url || ('/_blob/' + d.assetId); return /^(https:|\/_blob\/)/.test(u) ? u : '#'; }; // M3: never a javascript: link
@@ -3171,7 +3084,7 @@ VIEWS.instellingen = () => {
     `</div><div class="cols">` +
     card('Vaste overboekingen', 'Naar je eigen rekeningen, op een vast ritme', btn(icon('plus') + 'Overboeking', 'newTransfer', '', 'sm'),
       all('transfers').length ? `<div class="list">${all('transfers').map(t => `<button type="button" class="li" data-act="editTransfer" data-id="${E(t.id)}"><span class="grow"><b>${E(t.name)}</b><span class="tsub">Elke ${t.intervalDays === 7 ? 'week' : E(t.intervalDays) + ' dagen'} naar ${E(accName(t.toAccountId))}${t.active === false ? ' · gestopt' : ''}</span></span><span class="amt">${eur(t.amount)}</span></button>`).join('')}</div>` : '<p class="muted small">Geen vaste overboekingen.</p>') +
-    card('Salaris', 'Stel je salaris in bij Inkomsten', `<button type="button" class="btn sm" data-go="salaris">Naar Inkomsten</button>`,
+    card('Salaris', 'Vast salaris per maand en salarisdag. Een salaris toevoegen doe je bij Inkomsten met + Salaris.', btn('Wijzigen', 'salBase', '', 'sm'),
       kv([['Netto per maand', eur(salaryAt(nextPayDates(1)[0]).net)], ['Salaris komt', 'elke maand op de ' + payDay() + 'e']])) +
     `</div><div class="cols">` +
     card('Categorieën', '', btn('Wijzigen', 'editCats', '', 'sm'), `<div class="row" style="gap:6px">${(cfg.categories || []).map(c => pill(c)).join('')}</div>`) +
@@ -4344,6 +4257,8 @@ function kidIncomeGot(it, d) {
   if ((it.gotMonths || {})[mk]) return { manual: true };
   const tol = Math.max(1, +it.amount * 0.03);
   const pt = kidIncomeParts(it, d);
+  { const own = kidOwnAcc(kids()[0]), lt = own && activeTx().find(t => t.kidItem === it.id && kidTransfer(t, own) && (t.kidMk || monthKey(t.date)) === mk); // linked transfer to his account (31-10-2026)
+    if (lt && !pt.txs.length && !activeTx().some(t => t.kind === 'inkomst' && t.kidItem === it.id && monthKey(t.date) === mk)) return { tx: lt, sum: Math.abs(+lt.amount) }; }
   if (pt.txs.length) return pt.sum >= +it.amount - tol || (it.partOk || {})[mk] ? { tx: pt.txs[pt.txs.length - 1], txs: pt.txs, sum: pt.sum } : null; // in parts: received when the parts add up (or accepted)
   const t = activeTx().find(t => t.kind === 'inkomst' && +t.amount > 0 && !t.kidMk && ((t.kidItem === it.id && monthKey(t.date) === mk) || (Math.abs(diffDays(t.date, d)) <= 7 && Math.abs(t.amount - it.amount) <= tol)));
   return t ? { tx: t, txs: [t], sum: r2(+t.amount) } : null;
@@ -4388,9 +4303,9 @@ function kidCostsByParent(k, from, to) {
   const ids = freeAccIds();
   return r2(-sum(activeTx().filter(t => t.date >= from && t.date <= to && ids.includes(t.accountId) && +t.amount < 0 && t.kind === 'uitgave' && txKid(t) === k.id), t => +t.amount));
 }
-function kidTakenBack(k, from, to) {
+function kidTakenBack(k, from, to, linkedOnly) {
   const own = kidOwnAcc(k); if (!own) return 0;
-  return r2(sum(activeTx().filter(t => t.date >= from && t.date <= to && kidTransfer(t, own) && !kidInto(t, own)), t => Math.abs(+t.amount)));
+  return r2(sum(activeTx().filter(t => t.date >= from && t.date <= to && kidTransfer(t, own) && !kidInto(t, own) && (!linkedOnly || !!t.fixedId)), t => Math.abs(+t.amount)));
 }
 /* advanced for the child and not yet taken back from his account (since the start) */
 function kidAdvance(k) { const from = addDays(kidStart(k), 1), T = today(); return r2(Math.max(0, kidCostsByParent(k, from, T) - kidTakenBack(k, from, T))); }
@@ -4412,13 +4327,17 @@ function kidFree(k) {
   const fxAll = fixedInPeriod(p).filter(x => x.f.kid === k.id), fx = fxAll.filter(x => !x.paid), toPay = r2(sum(fx, x => x.amount)), fxSum = r2(sum(fxAll, x => x.amount));
   const loose = r2(-sum(activeTx().filter(t => inP(t.date, p) && +t.amount < 0 && !t.fixedId && t.kind === 'uitgave' && txKid(t) === k.id), t => +t.amount));
   // taken back from his account: up to what Arjan paid for him this period it is a refund (already counted above); the rest lowers his Vrij te besteden
-  const taken = kidTakenBack(k, p.start, p.end), paidFor = kidCostsByParent(k, p.start, p.end), takenOther = r2(Math.max(0, taken - paidFor));
+  // taken off his account: first it covers his fixed costs Arjan paid (unless a withdrawal is linked to that fixed cost itself), then Arjan's other
+  // expenses for him; the rest is also spent on him. Nothing counts twice.
+  const takenL = kidTakenBack(k, p.start, p.end, true), taken = r2(kidTakenBack(k, p.start, p.end) - takenL), paidFx = r2(kidCostsByParent(k, p.start, p.end) - loose);
+  const takenOther = r2(Math.max(0, taken - Math.max(0, paidFx - takenL) - loose));
   const nm = n => n === 1 ? '' : 'en';
   lines.push({ key: 'inc', label: `Toeslagen deze periode${spread ? ` (per kwartaal gespreid: 1/3 per periode)` : all0.length ? ` (${got.length} ontvangen${inc.length ? ', ' + inc.length + ' verwacht' : ''})` : ''}`, v: r2(monthly + spread) });
   if (extra) lines.push({ key: 'dep', label: 'Ander geld gestort op ' + (own ? own.name : 'zijn rekening'), v: extra });
   lines.push({ key: 'fix', label: `Vaste lasten deze periode${fxAll.length ? ` (${fxAll.length - fx.length} betaald${fx.length ? ', ' + fx.length + ' nog te betalen' : ''})` : ''}`, v: -fxSum });
-  if (loose) lines.push({ key: 'loose', label: 'Andere uitgaven voor ' + k.name, v: -loose });
-  if (takenOther) lines.push({ key: 'taken', label: `Opgenomen van ${own ? own.name : 'zijn rekening'}, niet voor zijn kosten`, v: -takenOther });
+  // 31-10-2026: everything taken from his (savings) account is spent on him: one line with his other expenses
+  const other = r2(loose + takenOther);
+  if (other) lines.push({ key: 'loose', label: 'Andere uitgaven voor ' + k.name, v: -other });
   const total = r2(sum(lines, l => l.v)), daysLeft = diffDays(p.end, T) + 1;
   return { k, p, pot, lines, total, daysLeft, perDay: total / Math.max(1, daysLeft), toGet, toPay, inc, fx, budLeft: 0, bud: 0, advance: kidAdvance(k) };
 }
@@ -4430,6 +4349,24 @@ function kidHideTx(t) { const k = kids()[0]; if (!k) return false; const own = k
 const kidFromName = t => { const k = kids()[0], own = k && kidOwnAcc(k); return own && kidTransfer(t, own) && !kidInto(t, own) ? 'Van ' + k.name : null; };
 const kidTitleOf = t => String(t.kidTitle || '').trim();
 function kidListName(t) { const from = kidFromName(t); return from ? kidTitleOf(t) || from : null; }
+/* transaction form, a transfer with the child's account (31-10-2026): link it to one of his fixed costs or allowances, like other transactions */
+function kidTrSelField(t) {
+  const k = kids()[0], own = k && kidOwnAcc(k); if (!own || !t || !t.id) return '';
+  const cur = t.fixedId && S.fixed.get(t.fixedId)?.kid === k.id ? 'fx:' + t.fixedId : t.kidItem ? 'inc:' + t.kidItem : '';
+  const opts = [['', 'Nee'], ...kidCosts(k).filter(f => f.active !== false).map(f => ['fx:' + f.id, 'Vaste last van ' + k.name + ': ' + f.name]), ...(k.incomes || []).map(it => ['inc:' + it.id, 'Toeslag van ' + k.name + ': ' + it.name])];
+  return F.text('kidTitle', 'Naam bij ' + k.name, kidTxTitle(t), { cls: 'span2', when: 'kidMove=true' }) + F.select('kidSelTr', 'Hoort bij', cur, opts, { cls: 'span2', when: 'kidMove=true' });
+}
+function kidTrSelApply(doc, sv, title) {
+  const n = String(title ?? '').trim(), bank = String(doc.description || '').replace(/^['"]+|['"]+$/g, '').trim() || doc.name;
+  const tt = title === undefined ? {} : { kidTitle: n && n !== bank ? n : null };
+  return { ...tt, ...kidTrLink(doc, sv) };
+}
+function kidTrLink(doc, sv) {
+  const [type, id] = String(sv || '').split(':');
+  if (type === 'fx' && S.fixed.get(id)) return { fixedId: id, kidItem: null, kidMk: null };
+  if (type === 'inc') { const it = (kids()[0]?.incomes || []).find(x => x.id === id); if (it) { const near = kidIncomeDates(it, addDays(doc.date, -45), addDays(doc.date, 45)).sort((a, b) => Math.abs(diffDays(a, doc.date)) - Math.abs(diffDays(b, doc.date)))[0]; return { fixedId: null, kidItem: id, kidMk: near ? monthKey(near) : monthKey(doc.date) }; } }
+  return { fixedId: null, kidItem: null, kidMk: null };
+}
 /* transaction form: tick to place it with the child's transfers (a transfer with his savings account) */
 function kidMoveField(t) {
   const k = kids()[0], own = k && kidOwnAcc(k); if (!own || !t || !t.id) return '';
@@ -4755,9 +4692,10 @@ VIEWS.kind = () => {
   const trs = own ? activeTx().filter(t => kidTransfer(t, own)).sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || '').localeCompare(a.createdAt || '')) : [];
   const tin = r2(sum(trs.filter(t => kidInto(t, own)), t => Math.abs(+t.amount))), tout = r2(sum(trs.filter(t => !kidInto(t, own)), t => Math.abs(+t.amount))), lim = UI.kidTrLimit || 50;
   const trList = trs.slice(0, lim).map(t => { const inn = kidInto(t, own), pt0 = kidPartyTxt(t, k), pt = pt0 && pt0 !== kidTxTitle(t) ? pt0 : '';
-    return `<button type="button" class="li" data-act="kidTxName" data-id="${E(t.id)}">${kindTile(inn ? 'in' : 'out', inn ? 'var(--sys-green)' : 'var(--sys-red)')}<span class="grow"><b>${E(kidTxTitle(t))}</b><span class="tsub">${fmtShort(t.date)} ${t.date.slice(0, 4)} · ${inn ? 'Gestort' : 'Opgenomen'}${pt ? ' · ' + E(pt) : ''}</span></span><span class="amt${inn ? ' pos' : ''}">${inn ? '+' : '−'}${eur(Math.abs(+t.amount))}</span></button>`; }).join('');
-  return head(k.name, (own && own.iban ? btn('Rekening en saldo', 'kidMoneyEdit') : '') + btn(icon('plus') + 'Toeslag', 'kidNewIncome', '', 'primary'), sel + mbar, age != null ? `${age} jaar${k.birth ? ' · jarig op ' + fmtShort(k.birth) : ''}` : '') + top + `
-    <div class="card"><div class="card-h"><h2>Ontvangen · rekening Arjan</h2><button type="button" class="btn sm" data-act="kidNewIncome">${icon('plus')}Toevoegen</button></div>
+    const lk = t.fixedId && S.fixed.get(t.fixedId) ? S.fixed.get(t.fixedId).name : t.kidItem ? ((k.incomes || []).find(i => i.id === t.kidItem) || {}).name : '';
+    return `<button type="button" class="li" data-act="editTx" data-id="${E(t.id)}">${kindTile(inn ? 'in' : 'out', inn ? 'var(--sys-green)' : 'var(--sys-red)')}<span class="grow"><b>${E(kidTxTitle(t))}</b><span class="tsub">${fmtShort(t.date)} ${t.date.slice(0, 4)} · ${inn ? 'Gestort' : 'Opgenomen'}${lk ? ' · ' + E(lk) : pt ? ' · ' + E(pt) : ''}</span></span><span class="amt${inn ? ' pos' : ''}">${inn ? '+' : '−'}${eur(Math.abs(+t.amount))}</span></button>`; }).join('');
+  return head(k.name, (own && own.iban ? btn('Rekening en saldo', 'kidMoneyEdit') : '') + btn(icon('plus') + 'Toeslag', 'kidNewIncome', '', 'primary'), sel + mbar) + top + `
+    <div class="card"><div class="card-h"><h2>Ontvangen · rekening Arjan</h2></div>
       ${incRows ? table(incRows) : emptyState('Nog geen toeslagen', 'Voeg kinderbijslag, kindgebonden budget of een bijdrage toe.')}
       ${incOther ? `<p class="small muted" style="margin-top:6px">${incOther} ${incOther === 1 ? 'toeslag komt' : 'toeslagen komen'} niet in ${mn}.</p>` : ''}
       <p class="small muted" style="margin-top:10px">Komt binnen op de rekening van Arjan. Herkend aan bedrag en afzender: dan staat het op <i>Ontvangen</i>. Het saldo van ${E(k.name)} verandert pas door de overboeking naar zijn rekening.</p></div>
@@ -4921,7 +4859,7 @@ function incomeOverview() {
   const T = today(), cm = monthKey(T), cur = monthP(cm), nNext = 1 + (UI.incNext || 0), nPrev = UI.incPrev || 0;
   const next = Array.from({ length: nNext }, (_, i) => monthP(addMonths(cm, i + 1)));
   const prev = Array.from({ length: nPrev }, (_, i) => monthP(addMonths(cm, -(i + 1))));
-  return `${salCard()}<div class="row inc-tools"><button type="button" class="btn sm ghost" data-act="mortgageEdit">Hypotheekrente ${mortgageCfg() ? 'wijzigen' : 'instellen'}</button><button type="button" class="btn sm ghost" data-act="salInfo">Salaris per jaar</button></div>`
+  return `<div class="row inc-tools"><button type="button" class="btn sm ghost" data-act="mortgageEdit">Hypotheekrente ${mortgageCfg() ? 'wijzigen' : 'instellen'}</button><button type="button" class="btn sm ghost" data-act="salInfo">Salaris per jaar</button></div>`
     + incPeriodCard(cur, 'nu') + next.map(x => incPeriodCard(x, 'komt nog')).join('')
     + `<div class="inc-more"><button type="button" class="btn" data-act="incNextMore">Volgende maanden tonen</button>${UI.incNext ? '<button type="button" class="btn ghost" data-act="incNextLess">Minder</button>' : ''}</div>`
     + (nPrev ? `<h3 class="xh" style="margin:0 0 -8px">Eerdere maanden</h3>` + prev.map(x => incPeriodCard(x)).join('') : '')
@@ -4955,9 +4893,8 @@ ACT.linkExtra = el => {
 };
 {
   VIEWS.salaris = () => {
-    if (UI.salTab === 'calc') return salCalcView();
-    const seg = `<div class="seg"><button type="button" data-act="salTab" data-v="overzicht" aria-pressed="true">Overzicht</button><button type="button" data-act="salTab" data-v="calc" aria-pressed="false">Calculator</button></div>`;
-    return head('Inkomsten', btn(icon('plus') + 'Inkomst', 'newIncome', '', 'primary')) + `<div class="toolbar">${seg}</div>` + incomeOverview();
+    // 31-10-2026: no calculator and no salary block; one button adds the salary
+    return head('Inkomsten', btn(icon('plus') + 'Salaris', 'salAdd') + btn(icon('plus') + 'Inkomst', 'newIncome', '', 'primary')) + incomeOverview();
   };
 }
 
@@ -4985,16 +4922,19 @@ ACT.liefkie = () => {
    Vast salaris per maand. Bovenaan het huidige salaris (netto, bruto, percentage) en de salarisdag;
    daaronder elke wijziging: "vanaf" een maand of "alleen" die maand. Alles tikbaar: wijzigen of verwijderen. */
 const salMonthTxt = mk => `${MONTHS[+mk.slice(5) - 1]} ${mk.slice(0, 4)}`;
-function salCard() {
-  const s = C().salary, ch = salChanges(), now = salaryAt(nextPayDates(1)[0]);
-  const pctTxt = (n, g) => n > 0 && g > 0 ? ` · ${nr(n / g * 100, 1)}% van bruto` : '';
-  const line = (act, id, title, net, gross, sub) => `<button type="button" class="li" data-act="${act}"${id ? ` data-id="${E(id)}"` : ''}><span class="grow"><b>${title}</b><span class="tsub">${sub}</span></span><span class="num"><b>${eur(net)}</b>${gross ? `<span class="tsub">${eur(gross)} bruto</span>` : ''}</span></button>`;
-  const base = line('salBase', '', ch.length ? 'Salaris tot de eerste wijziging' : 'Salaris per maand', +s.fixedNet || 0, +s.fixedGross || 0, `netto${pctTxt(+s.fixedNet, +s.fixedGross)} · komt op de ${payDay()}e (in het weekend de vrijdag ervoor)`);
-  const rows = ch.map(c => line('salChange', c.id, c.once ? `Alleen ${salMonthTxt(c.from)}` : `Vanaf ${salMonthTxt(c.from)}`, +c.net, +c.gross || 0, `netto${pctTxt(+c.net, +c.gross)} · uitbetaald ${fmtShort(payDateIn(c.from))}${c.once ? ', daarna weer het vorige bedrag' : ''}`)).join('');
-  return `<div class="card sal-set"><div class="card-h"><h2>Salaris</h2><div class="row" style="gap:6px"><button type="button" class="btn sm" data-act="salChange">+ Nieuw salaris</button><button type="button" class="btn sm" data-act="newIncome">+ Extra uitkering</button></div></div>
-    <div class="list">${base}${rows}</div>
-    <p class="small muted" style="margin-top:8px">Nu: ${eur(now.net)} netto per maand. Een extra uitkering (bijv. eindejaarsuitkering) verschijnt in de maand waarin je hem verwacht en telt mee in Vrij te besteden.</p></div>`;
-}
+/* "+ Salaris" (31-10-2026): one small sheet with amount and date already filled in; it adds a salary transaction */
+ACT.salAdd = () => {
+  const T = today(), cm = monthKey(T); let mk = cm; if (incSalary(monthP(cm)).got) mk = addMonths(cm, 1);
+  const s = incSalary(monthP(mk)), acc0 = mainFreeId();
+  openSheet({ title: 'Salaris toevoegen', submit: 'Toevoegen', body: `<div class="grid2">${F.money('amount', 'Netto bedrag', s.amount, { req: 1 })}${F.date('date', 'Datum', s.d, { req: 1 })}
+      ${F.check('vast', 'Vanaf deze maand mijn vaste salaris', false, { cls: 'span2' })}</div>`,
+    extraFoot: `<button type="button" class="btn left" data-act="salBaseOpen">Vast salaris en salarisdag</button>`,
+    actions: { salBaseOpen: () => { closeSheet(); setTimeout(() => ACT.salBase(), 60); } },
+    onSubmit: v => { if (!isFinite(v.amount) || !(v.amount > 0)) throw new Error('Vul het bedrag in.'); if (!v.date) throw new Error('Kies een datum.');
+      const amt = r2(v.amount), ops = [{ col: 'transactions', id: uid('tx'), data: { date: v.date, name: 'Salaris', description: '', amount: amt, kind: 'inkomst', category: 'Salaris', accountId: acc0 || null, status: 'ok', source: 'handmatig', salManual: true, createdAt: new Date().toISOString() } }];
+      if (v.vast) { const from = monthKey(v.date), rest = (C().salary.changes || []).filter(x => !(x.from === from && !x.once)); ops.push({ col: 'config', id: 'main', data: { ...C(), salary: { ...C().salary, mode: 'vast', changes: [...rest, { id: uid('sal'), from, once: false, net: amt, gross: null }] } } }); }
+      return commit(`Salaris ${eur(amt)} toegevoegd`, ops); } });
+};
 /* netto, percentage and bruto that keep each other up to date (as in a sheet) */
 const salTrio = (net, gross) => { const pct = net > 0 && gross > 0 ? Math.round(net / gross * 10000) / 100 : Math.round((C().salary.fallbackFactor || 0.72) * 10000) / 100;
   return `${F.money('net', 'Netto per maand', net || null, { req: 1 })}${F.num('pct', 'Netto is … % van bruto', pct, { step: '0.01' })}${F.money('gross', 'Bruto per maand', gross || (net ? r2(net / (pct / 100)) : null))}`; };
