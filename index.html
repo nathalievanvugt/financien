@@ -3859,7 +3859,7 @@ function setupOps(s) {
     for (let i = ops.length - 1; i >= 0; i--) { const o = ops[i]; if (o.col === 'fixed' && !o.data.kid && !o.data.car && spec.has(fxDupKey(o.data))) ops.splice(i, 1); } }
   // kinderopvang typed at Vaste lasten belongs to the child
   if (s.kid && String(s.kidName || '').trim()) ops.forEach(o => { if (o.col === 'fixed' && !o.data.kid && /opvang|\bbso\b|kinderdagverblijf|gastouder/i.test(o.data.name)) o.data.kid = 'kid-1'; });
-  ops.push({ col: 'config', id: 'main', data: { ...D, salary, car, setupDone: true, grocStartSet: true, grocStartV2: true, carFixedDone: true, kidFixDone: true, ownerName: String(s.name || '').trim(), payMode: monthly ? 'maand' : '4weken', payDay: Math.round(n(s.payDay) || 25), salaryAnchor: monthly ? T : s.anchor, freeAccounts: ['acc-main'], minBuffer: r2(n(s.buffer) || 0), budgets, categories, kids: kidsCfg, groceryPot: s.grocery && n(s.groceryWeek) > 0 ? { week: r2(n(s.groceryWeek)), anchor: T, from: T, until: null, weeks: {} } : null, mortgageRefund: s.house && n(s.mortAmt) > 0 ? { day: Math.min(31, Math.max(1, Math.round(n(s.mortDay) || 20))), rates: [{ from: monthKey(T), amount: r2(n(s.mortAmt)) }] } : null, lastBackup: null } });
+  ops.push({ col: 'config', id: 'main', data: { ...D, salary, car, setupDone: true, grocStartSet: true, grocStartV2: true, zwemFix2610: true, carFixedDone: true, kidFixDone: true, ownerName: String(s.name || '').trim(), payMode: monthly ? 'maand' : '4weken', payDay: Math.round(n(s.payDay) || 25), salaryAnchor: monthly ? T : s.anchor, freeAccounts: ['acc-main'], minBuffer: r2(n(s.buffer) || 0), budgets, categories, kids: kidsCfg, groceryPot: s.grocery && n(s.groceryWeek) > 0 ? { week: r2(n(s.groceryWeek)), anchor: T, from: T, until: null, weeks: {} } : null, mortgageRefund: s.house && n(s.mortAmt) > 0 ? { day: Math.min(31, Math.max(1, Math.round(n(s.mortDay) || 20))), rates: [{ from: monthKey(T), amount: r2(n(s.mortAmt)) }] } : null, lastBackup: null } });
   return ops;
 }
 ACT.suFinish = async () => {
@@ -4172,6 +4172,7 @@ function groceryAuto() {
   if (GROC_BUSY || BOOT.state !== 'ready') return;
   const run = (msg, ops) => { GROC_BUSY = true; commit(msg, ops, { log: false }).catch(e => console.warn(e)).finally(() => { GROC_BUSY = false; setTimeout(groceryAuto, 0); }); };
   const clean = groceryCleanOps(); if (clean.length) return run('Boodschappen naar Vaste lasten', clean);
+  const zw = zwemFixOps(); if (zw.length) return run('Zwemles per kwartaal', zw);
   const mig = groceryStartOps().length ? groceryStartOps() : groceryWeekMigrateOps();
   if (mig.length) return run('Boodschappen per week', mig);
   const sops = resSeriesOps(); if (sops.length) return run('Reeksen bijgewerkt', sops);
@@ -4397,8 +4398,8 @@ function kidFree(k) {
   // Vrij te besteden of the child for this period (26/27-10-2026): the balance he starts the period with does not count.
   // + allowances of this period (an allowance paid per quarter is spread: a third per period) + other money put on his account
   // − his fixed costs of this period (paid or not) − his other expenses − money taken from his account that was not for his costs
-  // per calendar month (31-10-2026): the child's money has nothing to do with Arjan's salary date, and his page shows months
-  const T = today(), p = monthP(monthKey(T)), own = kidOwnAcc(k), pot = kidPot(k), lines = [];
+  // per salary period, like Arjan's own (31-10-2026, asked for again): from Arjan's salary up to the next one; the lists on his page stay per month
+  const T = today(), p = periodOf(T), own = kidOwnAcc(k), pot = kidPot(k), lines = [];
   const its = k.incomes || [], q = it => it.freq === 'kwartaal';
   const all0 = its.flatMap(it => kidIncomeDates(it, p.start, p.end).map(d => ({ it, d, got: kidIncomeGot(it, d) })));
   const inc = all0.filter(x => !x.got), got = all0.filter(x => x.got);
@@ -4413,9 +4414,9 @@ function kidFree(k) {
   // taken back from his account: up to what Arjan paid for him this period it is a refund (already counted above); the rest lowers his Vrij te besteden
   const taken = kidTakenBack(k, p.start, p.end), paidFor = kidCostsByParent(k, p.start, p.end), takenOther = r2(Math.max(0, taken - paidFor));
   const nm = n => n === 1 ? '' : 'en';
-  lines.push({ key: 'inc', label: `Toeslagen deze maand${spread ? ` (per kwartaal gespreid: 1/3 per maand)` : all0.length ? ` (${got.length} ontvangen${inc.length ? ', ' + inc.length + ' verwacht' : ''})` : ''}`, v: r2(monthly + spread) });
+  lines.push({ key: 'inc', label: `Toeslagen deze periode${spread ? ` (per kwartaal gespreid: 1/3 per periode)` : all0.length ? ` (${got.length} ontvangen${inc.length ? ', ' + inc.length + ' verwacht' : ''})` : ''}`, v: r2(monthly + spread) });
   if (extra) lines.push({ key: 'dep', label: 'Ander geld gestort op ' + (own ? own.name : 'zijn rekening'), v: extra });
-  lines.push({ key: 'fix', label: `Vaste lasten deze maand${fxAll.length ? ` (${fxAll.length - fx.length} betaald${fx.length ? ', ' + fx.length + ' nog te betalen' : ''})` : ''}`, v: -fxSum });
+  lines.push({ key: 'fix', label: `Vaste lasten deze periode${fxAll.length ? ` (${fxAll.length - fx.length} betaald${fx.length ? ', ' + fx.length + ' nog te betalen' : ''})` : ''}`, v: -fxSum });
   if (loose) lines.push({ key: 'loose', label: 'Andere uitgaven voor ' + k.name, v: -loose });
   if (takenOther) lines.push({ key: 'taken', label: `Opgenomen van ${own ? own.name : 'zijn rekening'}, niet voor zijn kosten`, v: -takenOther });
   const total = r2(sum(lines, l => l.v)), daysLeft = diffDays(p.end, T) + 1;
@@ -4481,7 +4482,7 @@ function kidFreeLinesForParent() {
 /* ---- dashboard: the same block as the parent's, one per child ---- */
 function kidHeroes() {
   return kids().map(k => { const f = kidFree(k), own = kidOwnAcc(k);
-    return `<div class="hero-main hz hz-kid">${heroFree({ ...f, saldo: f.pot, ccDebt: 0 }, { title: 'Vrij te besteden ' + k.name, icon: 'kind', noRing: true, saldoLabel: own ? 'Saldo ' + own.name : 'Geld van ' + k.name + ' nu', note: `<p class="small muted" style="margin-top:8px">Tot en met ${fmtLong(f.p.end)}. Helemaal los van jouw eigen Vrij te besteden. <button type="button" class="link" data-go="kind">Naar ${E(k.name)}</button></p>` })}</div>`; }).join('');
+    return `<div class="hero-main hz hz-kid">${heroFree({ ...f, saldo: f.pot, ccDebt: 0 }, { title: 'Vrij te besteden ' + k.name, icon: 'kind', noRing: true, saldoLabel: own ? 'Saldo ' + own.name : 'Geld van ' + k.name + ' nu', note: `<p class="small muted" style="margin-top:8px">Van het salaris van ${fmtLong(f.p.start)} tot het volgende op ${fmtLong(addDays(f.p.end, 1))}, net als jouw eigen. Helemaal los van jouw eigen Vrij te besteden. <button type="button" class="link" data-go="kind">Naar ${E(k.name)}</button></p>` })}</div>`; }).join('');
 }
 
 ACT.kidMoneyEdit = () => {
@@ -4739,7 +4740,7 @@ VIEWS.kind = () => {
   // same style as the blocks on the dashboard
   const ibanTxt = own ? (own.iban ? E(own.iban.replace(/(.{4})/g, '$1 ').trim()) : 'rekeningnummer nog invullen') + (own.balanceDate ? ' · saldo ingevuld op ' + fmtD(own.balanceDate) : '') : '';
   const top = `<div class="hero-main hz hz-kid kid-top2">${heroFree({ ...f, saldo: f.pot, ccDebt: 0 }, { title: 'Vrij te besteden ' + k.name, icon: 'kind', noRing: true, saldoLabel: own ? 'Saldo ' + own.name : 'Geld van ' + k.name + ' nu',
-      note: `<p class="small muted" style="margin-top:8px">Tot en met ${fmtLong(f.p.end)}. Het saldo telt niet mee.${ibanTxt ? ' ' + ibanTxt + '.' : ''}</p>` })}</div>
+      note: `<p class="small muted" style="margin-top:8px">Van het salaris van ${fmtLong(f.p.start)} tot het volgende salaris op ${fmtLong(addDays(f.p.end, 1))}. Het saldo telt niet mee.${ibanTxt ? ' ' + ibanTxt + '.' : ''}</p>` })}</div>
     ${own && f.advance > 0 ? `<div class="notice info"><span><b>Voorgeschoten voor ${E(k.name)}, nog terughalen: ${eur(f.advance)}.</b> Dit betaalde Arjan voor ${E(k.name)} van zijn eigen rekening en haalde hij nog niet terug van ${E(own.name)}.</span></div>` : ''}
     ${!own || !own.iban ? `<div class="notice"><span>Vul het rekeningnummer van de spaarrekening van ${E(k.name)} in. Dan komen alleen de overboekingen tussen jouw rekening en dat nummer bij ${E(k.name)}.</span><button type="button" class="btn sm" data-act="kidMoneyEdit">Invullen</button></div>` : ''}`;
   // 2. allowances, received on the parent's account
@@ -5032,6 +5033,13 @@ function salPlanMigrate() { const pl = C().salaryPlan || {}, ks = Object.keys(pl
   const ch = [...(C().salary.changes || [])]; ks.forEach(d => { const mk = monthKey(d); if (!ch.some(x => x.once && x.from === mk)) ch.push({ id: uid('sal'), from: mk, once: true, net: r2(+pl[d].net), gross: null }); });
   commit('Salaris per maand omgezet', [{ col: 'config', id: 'main', data: { ...C(), salaryPlan: {}, salary: { ...C().salary, changes: ch } } }], { log: false }).catch(e => console.warn(e)); }
 { const base = VIEWS.salaris; VIEWS.salaris = () => { setTimeout(salPlanMigrate, 0); return base(); }; }
+
+/* one time (asked for 31-10-2026): zwemles is per quarter, € 97,50, paid on 30 October 2026 (not every month) */
+function zwemFixOps() {
+  const cfg = C(); if (!cfg.setupDone || cfg.zwemFix2610) return [];
+  const ops = all('fixed').filter(f => /zwem/i.test(f.name) && f.kind === 'maand' && f.kid).map(f => ({ col: 'fixed', id: f.id, data: { ...f, kind: 'kwartaal', amount: 97.5, month: 10, day: 30, paidMonths: { ...(f.paidMonths || {}), '2026-10': true } } }));
+  return [...ops, { col: 'config', id: 'main', data: { ...cfg, zwemFix2610: true } }];
+}
 
 /* ================= start ================= */
 readHash();
