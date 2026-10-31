@@ -828,6 +828,13 @@ html{scrollbar-gutter:stable}
 .lf-list .li{padding-block:8px}
 .lf-del svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .lf-del.armed{width:auto;padding:0 10px;color:var(--neg);font-size:.82rem;font-weight:600}
+.res-more{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.res-more summary{cursor:pointer;font-weight:600;font-size:.9rem;color:var(--gb)}
+.inc-more{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+/* Inkomsten › Salaris: netto with bruto underneath; titles may wrap */
+.sal-set .li .num{display:flex;flex-direction:column;align-items:flex-end;white-space:nowrap;gap:1px}
+.sal-set .li .grow b{white-space:normal;overflow:visible;text-overflow:clip}
+.sal-set .card-h .row{flex-wrap:wrap;justify-content:flex-end}
 
 </style>
 <div class="shell">
@@ -887,7 +894,7 @@ html{scrollbar-gutter:stable}
   try { window.claude = window.LOCAL_CLAUDE; } catch (e) {}
 })();
 
-'use strict';
+'use strict';;
 /* ================= utilities ================= */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -1302,44 +1309,19 @@ function resRelinkOps(t, keepIds) {
 }
 const RES_STATUSES = ['Gereserveerd', 'Opzij zetten', 'Opzij gezet', 'Betaald'];
 
-/* salary model */
-function rateAt(date) {
-  const rs = (C().salary.rates || []).filter(r => r.from <= date).sort((a, b) => b.from.localeCompare(a.from));
-  return rs[0]?.rate ?? (C().salary.rates || [])[0]?.rate ?? 0;
-}
-function netFactor() {
-  const xs = all('salaries').filter(s => s.useForFactor && s.gross > 0 && s.netForFactor > 0);
-  if (!xs.length) return { factor: C().salary.fallbackFactor || 0.72, n: 0, min: null, max: null, from: null, to: null };
-  const fs = xs.map(s => s.netForFactor / s.gross);
-  const dates = xs.map(s => s.payDate).sort();
-  return { factor: sum(xs, s => s.netForFactor) / sum(xs, s => s.gross), n: xs.length, min: Math.min(...fs), max: Math.max(...fs), from: dates[0], to: dates[dates.length - 1] };
-}
-function calcGross({ hours, rate, weeks, saturdays, sundays }) {
-  const s = C().salary, hpd = +s.hoursPerDay || 8;
-  const base = (+hours || 0) * (+rate || 0);
-  const eju = base * (+s.eju || 0);
-  const care = (+weeks || 0) * (+s.carePerWeek || 0);
-  const sat = (+saturdays || 0) * hpd * rate * (+s.saturdayPct || 0);
-  const sun = (+sundays || 0) * hpd * rate * (+s.sundayPct || 0);
-  return { base, eju, care, sat, sun, gross: base + eju + care + sat + sun };
-}
-const expWeekend = () => { const s = C().salary; return { sat: s.expSat ?? 1, sun: s.expSun ?? 1 }; };
-/* per upcoming salary: what you expect to work extra (or less) — stored in config.salaryPlan[payDate] */
-/* normal number of working days per salary (4 weeks): 36 h/week × 4 / 8 h = 18 */
-const stdWorkdays = () => { const s = C().salary; return Math.round((+s.weeklyHours || 36) * (+s.weeks || 4) / (+s.hoursPerDay || 8)); };
 const salPlan = d => (C().salaryPlan || {})[d] || null;
-function salaryInputs(payDate, plan = salPlan(payDate)) {
-  const s = C().salary, weeks = +s.weeks || 4, w = expWeekend(), hpd = +s.hoursPerDay || 8;
-  const std = stdWorkdays(), days = plan?.workdays != null ? +plan.workdays : std + +(plan?.days || 0);
-  const sat = plan?.sat ?? (+w.sat || 0), sun = plan?.sun ?? (+w.sun || 0);
-  // normal salary: the contract hours exactly (36 × 52/12 = 156 per month); a planned salary: the days you fill in
-  const hours = plan?.workdays != null || plan?.days ? days * hpd : (+s.weeklyHours || 36) * weeks;
-  return { hours: hours + (+plan?.hours || 0), rate: rateAt(payDate), weeks, saturdays: +sat, sundays: +sun, days, std };
+/* Arjan has a fixed salary per month. A new salary can start in a month: "vanaf" (from then on) or "alleen" (just that month).
+   config.salary.changes = [{ id, from: 'YYYY-MM' (month the salary is paid), net, gross, once }]; before the first one: fixedNet / fixedGross. */
+const salChanges = () => (C().salary.changes || []).slice().sort((a, b) => a.from.localeCompare(b.from) || (a.once ? 1 : 0) - (b.once ? 1 : 0));
+function salaryAt(d) {
+  const s = C().salary, mk = monthKey(d), ch = salChanges();
+  const once = ch.find(c => c.once && c.from === mk); if (once) return { net: +once.net || 0, gross: +once.gross || null, src: once };
+  const rec = ch.filter(c => !c.once && c.from <= mk).pop(); if (rec) return { net: +rec.net || 0, gross: +rec.gross || null, src: rec };
+  return { net: +s.fixedNet || 0, gross: +s.fixedGross || null, src: null };
 }
 function predictSalary(payDate, plan) {
-  if (C().salary.mode === 'vast') { const pl = plan === undefined ? salPlan(payDate) : plan; return r2(pl?.net != null ? +pl.net : +C().salary.fixedNet || 0); }
-  const g = calcGross(salaryInputs(payDate, plan === undefined ? salPlan(payDate) : plan));
-  return r2(g.gross * netFactor().factor);
+  const pl = plan === undefined ? salPlan(payDate) : plan;
+  return r2(pl?.net != null ? +pl.net : salaryAt(payDate).net);
 }
 const salaryForPeriod = p => all('salaries').filter(s => inP(s.payDate, p)).sort((a, b) => a.payDate.localeCompare(b.payDate));
 
@@ -2479,19 +2461,23 @@ ACT.resPick = el => {
 ACT.resv = el => { UI.resView = el.dataset.v; render(); };
 ACT.newRes = () => resForm(null);
 ACT.editRes = el => { const r = S.reservations.get(el.dataset.id); if (r?.grocery && true && groceryWeekOn()) return ACT.groceryEdit(); resForm(r); };
+/* repeat a new reservation: [key, label, days, months] */
+const RES_REPEAT = [['once', 'Eenmalig', 0, 0], ['week', 'Elke week', 7, 0], ['month', 'Elke maand', 0, 1], ['2month', 'Elke 2 maanden', 0, 2], ['quarter', 'Elk kwartaal', 0, 3], ['year', 'Elk jaar', 0, 12]];
+const resRepeatDate = (d, rep, i) => rep[2] ? addDays(d, rep[2] * i) : dateIn(addMonths(monthKey(d), rep[3] * i), +d.slice(8, 10));
 function resForm(r) {
   const isNew = !r;
-  r = r || { name: '', type: 'Reservering', date: periodOf(today()).start, amount: null, paid: 0, status: 'Gereserveerd', note: '' };
+  r = r || { name: '', type: 'Reservering', date: periodOf(today()).end, amount: null, paid: 0, status: 'Gereserveerd', note: '' };
   const linked = isNew ? [] : all('transactions').filter(t => txResIds(t).includes(r.id) && t.status !== 'ignored');
   openSheet({
     title: isNew ? 'Reservering toevoegen' : r.name,
     body: `<div class="grid2">${F.text('name', 'Naam', r.name, { req: 1, cls: 'span2' })}
-      ${F.select('type', 'Soort', r.type, ['Reservering', 'Aflossing'])}${F.date('date', 'Datum (bepaalt de periode)', r.date, { req: 1 })}
-      ${F.money('amount', 'Bedrag', r.amount, { req: 1 })}${F.money('paid', 'Al betaald', r.paid)}
-      ${F.select('status', 'Status', r.status, RES_STATUSES)}${F.date('deadline', 'Uiterlijk betalen', r.deadline)}
-      ${isNew ? F.select('repeat', 'Herhalen', '1', [['1', 'Eenmalig'], ...[2, 3, 4, 5, 6, 8, 10, 12, 13].map(n => [String(n), `${n} periodes (elke ${PER()})`])]) : ''}
+      ${F.money('amount', 'Bedrag', r.amount, { req: 1 })}${F.date('date', 'Uiterlijk betalen op', r.date, { req: 1 })}
+      ${isNew ? F.select('repeat', 'Herhalen', 'once', RES_REPEAT.map(x => [x[0], x[1]])) + F.num('times', 'Hoeveel keer in totaal', 12, { step: 1, when: 'repeat=week|month|2month|quarter|year' }) : ''}</div>
+      <p class="small muted" style="margin-top:6px">De datum bepaalt in welke periode het bedrag meetelt bij Vrij te besteden.</p>
+      <details class="res-more"${!isNew && (r.status !== 'Gereserveerd' || +r.paid > 0 || r.note || r.type !== 'Reservering') ? ' open' : ''}><summary>Meer: status, al betaald, notitie</summary>
+      <div class="grid2" style="margin-top:10px">${F.select('status', 'Status', r.status, RES_STATUSES)}${F.money('paid', 'Al betaald', r.paid)}${F.select('type', 'Soort', r.type, ['Reservering', 'Aflossing'])}
       ${F.area('note', 'Notitie', r.note)}</div>
-      <p class="small muted">Gereserveerd en Opzij zetten tellen mee bij vrij te besteden. Opzij gezet staat al op een andere rekening en telt niet meer mee.</p>
+      <p class="small muted">Gereserveerd telt mee bij Vrij te besteden. Opzij gezet staat al op een andere rekening en telt niet meer mee. Betaald is klaar.</p></details>
       ${linked.length ? `<div><h3 style="margin-bottom:4px">Gekoppelde betalingen</h3>${linked.map(t => `<div class="cand"><span>${fmtD(t.date)} · ${E(t.name)}</span><span class="num">${eur(-t.amount)}</span><button type="button" class="btn sm ghost" data-act="unlinkRes" data-tx="${E(t.id)}">Ontkoppelen</button></div>`).join('')}</div>` : ''}
       ${!isNew && resOpen(r) > 0 ? (() => { const cs = txCandidates(t => r.date && diffDays(t.date, r.date) >= -20 && diffDays(t.date, r.date) <= 90, t => resScore(r, norm(t.name + ' ' + (t.description || '')), -t.amount, t.date) * 10 - Math.abs(diffDays(t.date, r.date)) / 10); return `<div><h3 style="margin-bottom:4px">Betaling koppelen</h3>${cs.length ? cs.map(c => candRow(c.t, 'doLinkRes')).join('') : '<p class="small muted">Geen losse betalingen rond deze datum gevonden.</p>'}</div>`; })() : ''}`,
     extraFoot: isNew ? '' : delBtn(),
@@ -2500,10 +2486,11 @@ function resForm(r) {
       unlinkRes: async b => { const t = S.transactions.get(b.dataset.tx); closeSheet(); const rest = txResIds(t).filter(id => id !== r.id); await commit(`${t.name} ontkoppeld`, [{ col: 'transactions', id: t.id, data: { ...t, reservationId: rest[0] || null, reservationIds: rest.length > 1 ? rest : null, category: rest.length ? t.category : t.kind === 'uitgave' ? 'Overig' : t.category, ...(r.grocery ? { groceryNo: true } : {}) } }, ...resRelinkOps(t, rest)]); } },
     onSubmit: async v => {
       if (!isFinite(v.amount)) throw new Error('Vul een geldig bedrag in.');
-      const base = { ...r, name: v.name, type: v.type, date: v.date, amount: r2(v.amount), paid: v.status === 'Betaald' ? r2(v.amount) : r2(v.paid || 0), status: v.status, deadline: v.deadline || null, note: v.note };
-      const n = isNew ? Math.max(1, +v.repeat || 1) : 1;
+      const base = { ...r, name: v.name, type: v.type, date: v.date, amount: r2(v.amount), paid: v.status === 'Betaald' ? r2(v.amount) : r2(v.paid || 0), status: v.status, deadline: v.date, note: v.note };
+      const rep = isNew ? RES_REPEAT.find(x => x[0] === v.repeat) || RES_REPEAT[0] : RES_REPEAT[0], n = rep[0] === 'once' ? 1 : Math.round(+v.times || 0);
+      if (rep[0] !== 'once' && !(n >= 2 && n <= 60)) throw new Error('Vul in hoeveel keer, tussen 2 en 60.');
       if (n === 1) return put('reservations', base, isNew ? `${v.name} toegevoegd` : `${v.name} opgeslagen`);
-      await commit(`${v.name} ${n}× toegevoegd`, Array.from({ length: n }, (_, i) => ({ col: 'reservations', id: uid('res'), data: { ...base, date: isMonthly() ? dateIn(addMonths(monthKey(v.date), i), +v.date.slice(8, 10)) : addDays(v.date, 28 * i), note: (v.note ? v.note + ' · ' : '') + `${i + 1} van ${n}`, paid: i === 0 ? base.paid : 0, status: i === 0 ? base.status : (base.status === 'Betaald' ? 'Gereserveerd' : base.status) } })));
+      await commit(`${v.name} ${n}× toegevoegd`, Array.from({ length: n }, (_, i) => ({ col: 'reservations', id: uid('res'), data: { ...base, date: resRepeatDate(v.date, rep, i), deadline: resRepeatDate(v.date, rep, i), note: (v.note ? v.note + ' · ' : '') + `${i + 1} van ${n}`, paid: i === 0 ? base.paid : 0, status: i === 0 ? base.status : (base.status === 'Betaald' ? 'Gereserveerd' : base.status) } })));
     },
   });
 }
@@ -2649,7 +2636,7 @@ const salaryCard = () => { const c = salaryChart(); if (!c) return ''; const got
 ACT.editExtra = el => extraForm(S.extras.get(el.dataset.id));
 function extraForm(x) {
   const isNew = !x; x = x || { name: '', amount: null, date: '', note: '', status: 'verwacht' };
-  openSheet({ title: isNew ? 'Extra inkomst' : x.name, body: `<div class="grid2">${F.text('name', 'Omschrijving', x.name, { req: 1, cls: 'span2', ph: 'Bijv. teruggave belasting' })}${F.money('amount', 'Verwacht bedrag', x.amount, { req: 1 })}${F.date('date', 'Verwacht rond', x.date || '')}${F.area('note', 'Notitie', x.note || '')}</div>${x.status === 'ontvangen' ? '<p class="small muted">Deze is al ontvangen. Wijzig het ontvangen bedrag bij de transactie.</p>' : ''}`,
+  openSheet({ title: isNew ? 'Extra uitkering' : x.name, body: `<div class="grid2">${F.text('name', 'Omschrijving', x.name, { req: 1, cls: 'span2', ph: 'Bijv. eindejaarsuitkering' })}${F.money('amount', 'Verwacht bedrag', x.amount, { req: 1 })}${F.date('date', 'Verwacht rond', x.date || '')}${F.area('note', 'Notitie', x.note || '')}</div>${x.status === 'ontvangen' ? '<p class="small muted">Deze is al ontvangen. Wijzig het ontvangen bedrag bij de transactie.</p>' : ''}`,
     extraFoot: isNew ? '' : delBtn(), actions: { delete: async () => { const own = x.transactionId && S.transactions.get(x.transactionId); if (own && isAppMadeExtraTx(own)) await commit('Extra inkomst verwijderd', [{ col: 'extras', id: x.id, data: null }, { col: 'transactions', id: x.transactionId, data: null }]); else await del('extras', x.id, 'Extra inkomst verwijderd'); } },
     onSubmit: v => { if (!isFinite(v.amount) || v.amount <= 0) throw new Error('Vul een bedrag in.'); return put('extras', { ...x, name: v.name, amount: r2(v.amount), date: v.date || null, note: v.note || '' }, `${v.name} opgeslagen`); } });
 }
@@ -2673,42 +2660,11 @@ ACT.undoExtra = el => {
 /* the calculation tab of Inkomsten; the overview tab is drawn in views12 */
 const salCalcView = () => {
   const seg = `<div class="seg"><button type="button" data-act="salTab" data-v="overzicht" aria-pressed="${UI.salTab === 'overzicht'}">Overzicht</button><button type="button" data-act="salTab" data-v="calc" aria-pressed="${UI.salTab === 'calc'}">Calculator</button></div>`;
-  const h = head('Inkomsten', btn(icon('plus') + 'Salaris', 'newSalary', '', 'primary')) + `<div class="toolbar">${seg}</div>`;
-  return h + nbCard() + caoCard();
-};
-ACT.planSalary = el => {
-  const d = el.dataset.d, pl = salPlan(d) || {}, w = expWeekend();
-  if (C().salary.mode === 'vast') return openSheet({ title: 'Salaris ' + fmtLong(d), body: `<p class="small muted">Normaal krijg je ${eur(C().salary.fixedNet)} netto. Verwacht je deze keer iets anders (bijv. vakantiegeld of een bonus), vul dat hier in.</p><div class="grid2">${F.money('net', 'Verwacht netto deze keer', pl.net ?? C().salary.fixedNet)}${F.text('note', 'Notitie', pl.note || '', { ph: 'bijv. vakantiegeld' })}</div>`,
-    extraFoot: salPlan(d) ? '<button type="button" class="btn ghost left" data-act="planReset">Terug naar normaal</button>' : '',
-    actions: { planReset: async () => { const plan = { ...(C().salaryPlan || {}) }; delete plan[d]; closeSheet(); await saveConfig({ salaryPlan: plan }, `Salaris ${fmtShort(d)} terug naar normaal`); } },
-    onSubmit: async v => { const plan = { ...(C().salaryPlan || {}) }; Object.keys(plan).forEach(k => { if (k < today()) delete plan[k]; }); if (!isFinite(v.net) || (r2(v.net) === r2(+C().salary.fixedNet || 0) && !v.note)) delete plan[d]; else plan[d] = { net: r2(v.net), note: (v.note || '').trim() }; await saveConfig({ salaryPlan: plan }, `Salaris ${fmtShort(d)} aangepast`); } });
-  const val = (k, def) => pl[k] ?? def;
-  const stepper = (n, l, v, min) => `<div class="f stp"><span>${l}</span><div class="stp-row"><button type="button" class="btn stp-b" data-stp="${n}" data-dir="-1" aria-label="Minder">−</button><input type="number" name="${n}" value="${v}" ${min != null ? `min="${min}"` : ''} step="1" inputmode="numeric"><button type="button" class="btn stp-b" data-stp="${n}" data-dir="1" aria-label="Meer">+</button></div></div>`;
-  const cur = salaryInputs(d);
-  const body = `<p class="small muted">Normaal werk je ${stdWorkdays()} dagen per salaris, waarvan ${w.sat} zaterdag en ${w.sun} zondag. Pas aan wat je voor dit salaris verwacht.</p>
-    <div class="grid2">${stepper('workdays', 'Gewerkte dagen', cur.days, 0)}${stepper('sat', 'Waarvan zaterdagen', cur.saturdays, 0)}${stepper('sun', 'Waarvan zondagen', cur.sundays, 0)}${F.text('note', 'Notitie', pl.note || '', { ph: 'bijv. extra dienst 24 okt' })}</div>
-    <div class="sal-prev"><span>Verwacht netto</span><b id="salPrev">${eur(predictSalary(d))}</b><span id="salPrevDif" class="small muted"></span></div>`;
-  const read = form => ({ workdays: Math.max(0, Math.round(+form.elements.workdays.value || 0)), sat: Math.max(0, Math.round(+form.elements.sat.value || 0)), sun: Math.max(0, Math.round(+form.elements.sun.value || 0)) });
-  const upd = form => { const v = read(form), n = predictSalary(d, v), b = predictSalary(d, null), df = r2(n - b); $('#salPrev').textContent = eur(n); $('#salPrevDif').textContent = Math.abs(df) >= 0.5 ? `${df > 0 ? '+' : '−'}${eur(Math.abs(df))} t.o.v. normaal` : 'zoals normaal'; };
-  openSheet({ title: 'Salaris ' + fmtLong(d), body, extraFoot: salPlan(d) ? '<button type="button" class="btn ghost left" data-act="planReset">Terug naar normaal</button>' : '',
-    actions: { input: (e, form) => upd(form), planReset: async () => { const plan = { ...(C().salaryPlan || {}) }; delete plan[d]; closeSheet(); await saveConfig({ salaryPlan: plan }, `Salaris ${fmtShort(d)} terug naar normaal`); } },
-    onOpen: form => { upd(form); form.addEventListener('click', e => { const b = e.target.closest('[data-stp]'); if (!b) return; const inp = form.elements[b.dataset.stp]; let v = Math.round(+inp.value || 0) + +b.dataset.dir; if (inp.min !== '' && v < +inp.min) v = +inp.min; inp.value = v; upd(form); }); },
-    onSubmit: async v => {
-      const p = { ...read($('#sheet form')), note: (v.note || '').trim() };
-      const same = p.workdays === stdWorkdays() && p.sat === (+w.sat || 0) && p.sun === (+w.sun || 0) && !p.note;
-      const plan = { ...(C().salaryPlan || {}) };
-      Object.keys(plan).forEach(k => { if (k < today()) delete plan[k]; });
-      if (same) delete plan[d]; else plan[d] = p;
-      await saveConfig({ salaryPlan: plan }, `Salaris ${fmtShort(d)} aangepast`);
-    } });
+  const h = head('Inkomsten', btn(icon('plus') + 'Inkomst', 'newIncome', '', 'primary')) + `<div class="toolbar">${seg}</div>`;
+  return h + caoCard();
 };
 ACT.salTab = el => { UI.salTab = el.dataset.v; render(); };
-ACT.newSalary = () => salaryForm(null);
 ACT.editSalary = (el, e) => { if (e?.target?.closest('[data-stop]')) return; salaryForm(S.salaries.get(el.dataset.id)); };
-const extrasText = xs => (xs || []).map(x => `${x.name} ${String(r2(x.amount)).replace('.', ',')}`).join('\n');
-function parseExtras(t) {
-  return String(t || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => { const m = l.match(/^(.*?)[\s:]+(-?[\d.,]+)\s*$/); return m ? { name: m[1].trim() || 'Vergoeding', amount: r2(parseAmount(m[2])) } : null; }).filter(x => x && isFinite(x.amount));
-}
 function salaryForm(s, prefill = {}) {
   const isNew = !s;
   s = s || { payDate: today(), period: '', hours: null, rate: null, weeks: 4, saturdays: 0, sundays: 0, gross: null, net: null, extras: [], useForFactor: false, verified: false, transactionId: null, documentId: null, note: '', ...prefill };
@@ -2718,14 +2674,8 @@ function salaryForm(s, prefill = {}) {
   openSheet({
     title: isNew ? 'Salaris toevoegen' : 'Salaris ' + fmtD(s.payDate),
     body: `${prefill.readNote ? `<div class="notice info">${E(prefill.readNote)}</div>` : ''}<div class="grid2">
-      ${F.date('payDate', 'Betaaldatum', s.payDate, { req: 1 })}${F.text('period', 'Periode', s.period, { ph: 'Loonweken 37–40' })}
-      ${F.money('gross', 'Bruto totaal', s.gross)}${F.money('net', 'Netto ontvangen', s.net, { req: 1 })}
-      ${F.num('hours', 'Gewerkte uren', s.hours)}${F.num('rate', 'Uurloon', s.rate)}
-      ${F.num('weeks', 'Loonweken', s.weeks)}${F.num('saturdays', 'Zaterdagen', s.saturdays)}${F.num('sundays', 'Zondagen', s.sundays)}
-      <label class="f span2">Eenmalige netto vergoedingen (één per regel, bijv. "Reiskosten 9,13")<textarea id="f-extras" name="extras" rows="2">${E(extrasText(s.extras))}</textarea></label>
+      ${F.date('payDate', 'Betaaldatum', s.payDate, { req: 1 })}${F.money('net', 'Netto ontvangen', s.net, { req: 1 })}${F.money('gross', 'Bruto (mag leeg)', s.gross)}
       ${F.select('transactionId', 'Bankontvangst', s.transactionId || '', [['', cand.length ? '— kies —' : 'Geen ontvangst rond deze datum'], ...cand.map(t => [t.id, `${fmtD(t.date)} · ${t.name} · ${eur(t.amount)}`])], { cls: 'span2' })}
-      ${F.check('verified', 'Gecontroleerd met de loonstrook', s.verified, { cls: 'span2' })}
-      ${F.check('useForFactor', 'Gebruiken voor de nettofactor', s.useForFactor, { cls: 'span2' })}
       ${F.area('note', 'Notitie', s.note)}</div>
       ${doc ? `<p class="small">Loonstrook: <a class="link" href="${E(docUrl(doc))}" target="_blank" rel="noopener">${E(doc.name)}</a></p>` : ''}`,
     extraFoot: isNew ? '' : delBtn(),
@@ -2733,9 +2683,7 @@ function salaryForm(s, prefill = {}) {
     onSubmit: async v => {
       if (!isFinite(v.net)) throw new Error('Vul het netto bedrag in.');
       if (v.gross != null && !isFinite(v.gross)) throw new Error('Het bruto bedrag is ongeldig.');
-      const extras = parseExtras(v.extras);
-      const doc2 = { ...s, payDate: v.payDate, period: v.period, gross: v.gross == null ? null : r2(v.gross), net: r2(v.net), hours: v.hours, rate: v.rate, weeks: v.weeks, saturdays: v.saturdays, sundays: v.sundays,
-        extras, netForFactor: r2(v.net - sum(extras, x => x.amount)), verified: v.verified, useForFactor: v.useForFactor && !!v.gross, transactionId: v.transactionId || null, note: v.note };
+      const doc2 = { ...s, payDate: v.payDate, gross: v.gross == null ? null : r2(v.gross), net: r2(v.net), transactionId: v.transactionId || null, note: v.note };
       const ops = [{ col: 'salaries', id: s.id || uid('sal'), data: doc2 }];
       const t = v.transactionId && S.transactions.get(v.transactionId);
       if (t && (t.category !== 'Salaris' || t.status === 'check')) ops.push({ col: 'transactions', id: t.id, data: { ...t, kind: 'inkomst', category: 'Salaris', status: 'ok' } });
@@ -2865,7 +2813,7 @@ function caoYear(c, y) {
     return { mk, sal, ex, raise, tot: r2(sal + sum(ex, e => e.v)) }; });
 }
 /* netto as a share of bruto: from the salary set above (netto / bruto), otherwise the percentage set there */
-const caoNetPct = () => { const s = C().salary; return +s.fixedNet > 0 && +s.fixedGross > 0 ? Math.round(s.fixedNet / s.fixedGross * 10000) / 100 : Math.round((s.fallbackFactor || 0.72) * 10000) / 100; };
+const caoNetPct = () => { const sa = salaryAt(nextPayDates(1)[0]); return sa.net > 0 && sa.gross > 0 ? Math.round(sa.net / sa.gross * 10000) / 100 : Math.round((C().salary.fallbackFactor || 0.72) * 10000) / 100; };
 /* a percentage typed straight into a month of the table: add, change or (empty / 0) remove that month's raise */
 document.addEventListener('change', e => { const el = e.target; if (!el.matches?.('input[data-cao-mk]')) return;
   const c = caoCfg(), mk = el.dataset.caoMk, v = el.value.trim() === '' ? 0 : parseFloat(el.value.replace(',', '.')), old = (c.raises || []).find(x => x.from === mk && x.kind !== 'eur');
@@ -2921,29 +2869,6 @@ ACT.caoExtraEdit = el => { const c = caoCfg(), x = (c.extras || []).find(e => e.
     onSubmit: v => { if (!isFinite(v.value) || !(v.value > 0)) throw new Error('Vul een percentage of bedrag in.'); const once = v.rep === 'once' ? Math.round(+v.y) : null; if (once != null && !(once > 1999 && once < 2100)) throw new Error('Vul een geldig jaar in.');
       const n = { id: x ? x.id : uid('x'), edited: true, name: v.name, kind: v.kind === 'eur' ? 'eur' : 'pct', value: +v.value, month: +v.m, once, rato: v.kind === 'eur' && !!v.rato };
       return caoSave({ extras: [...(c.extras || []).filter(e => e.id !== n.id), n] }, x ? 'Uitkering gewijzigd' : 'Uitkering toegevoegd'); } }); };
-
-/* ================= Netto en bruto per maand (vast salaris) =================
-   Netto invullen: bruto = netto / percentage (standaard 72%). Percentage aanpassen: bruto rekent mee.
-   Bruto zelf invullen: het percentage wordt netto / bruto. Opslaan zet zijn salaris (zelfde als bij Instellingen › Salaris). */
-const nbPct = () => Math.round((C().salary.fallbackFactor || 0.72) * 10000) / 100;
-function nbCard() {
-  const s = C().salary, net = +s.fixedNet || null, pct = net && +s.fixedGross > 0 ? Math.round(net / s.fixedGross * 10000) / 100 : nbPct(), gross = +s.fixedGross || (net ? r2(net / (pct / 100)) : null);
-  UI.nb = { net, gross, pct };
-  const inp = (k, l, v, step) => `<label class="f">${l}<input type="number" step="${step}" inputmode="decimal" id="nb-${k}" data-live="nb" data-k="${k}" value="${v == null ? '' : v}" min="0"></label>`;
-  return `<div class="card nb"><div class="card-h"><h2>Netto en bruto per maand</h2></div>
-    <div class="grid3">${inp('net', 'Netto per maand (€)', net, '0.01')}${inp('pct', 'Netto is … % van bruto', pct, '0.01')}${inp('gross', 'Bruto per maand (€)', gross, '0.01')}</div>
-    <p class="small muted" style="margin-top:10px">Vul je netto salaris in, dan rekent de app het bruto uit met het percentage. Weet je ook het precieze bruto bedrag, vul dat dan in: het percentage past zich aan.</p>
-    <div style="margin-top:12px"><button type="button" class="btn" data-act="nbSave">Opslaan als mijn salaris</button></div></div>`;
-}
-LIVE.nb = el => { const n = UI.nb || (UI.nb = {}), k = el.dataset.k, v = el.value === '' ? null : parseFloat(el.value), set = (id, x) => { const i = $('#nb-' + id); if (i) i.value = x == null || !isFinite(x) ? '' : String(r2(x)); };
-  n[k] = v;
-  if (k === 'net' || k === 'pct') { if (n.net > 0 && n.pct > 0) { n.gross = r2(n.net / (n.pct / 100)); set('gross', n.gross); } }
-  else if (k === 'gross') { if (n.net > 0 && n.gross > 0) { n.pct = Math.round(n.net / n.gross * 10000) / 100; set('pct', n.pct); } } };
-ACT.nbSave = () => { const n = UI.nb || {}, s = C().salary;
-  if (!(n.net > 0)) return toast('Vul je netto salaris per maand in.');
-  if (!(n.pct > 0 && n.pct <= 100)) return toast('Vul een percentage tussen 1 en 100 in.');
-  const gross = n.gross > 0 ? r2(n.gross) : r2(n.net / (n.pct / 100));
-  return saveConfig({ salary: { ...s, mode: 'vast', fixedNet: r2(n.net), fixedGross: gross, fallbackFactor: Math.round(n.net / gross * 10000) / 10000 } }, 'Salaris opgeslagen'); };
 
 /* ================= files and bank import ================= */
 const docUrl = d => { const u = d.url || ('/_blob/' + d.assetId); return /^(https:|\/_blob\/)/.test(u) ? u : '#'; }; // M3: never a javascript: link
@@ -3194,15 +3119,14 @@ VIEWS.instellingen = () => {
       `<div class="list">${accs.map(a => { const b = balance(a); return `<button type="button" class="li" data-act="editAccount" data-id="${E(a.id)}"><span class="grow"><b>${E(a.name)}${a.active === false ? ' <span class="pill">niet in gebruik</span>' : ''}</b><span class="tsub">${ROLE[a.role] || ''}${a.iban ? ' · ' + E(a.iban) : ''}</span></span><span class="amt">${b == null ? '<span class="pill warn">Saldo invullen</span>' : eur(b)}</span></button>`; }).join('')}</div>`) +
     `<div class="cols">` +
     card('Vrij te besteden', 'Waarmee het overzicht rekent', btn('Wijzigen', 'editFree', '', 'sm'),
-      kv([['Rekening(en)', E(free)], ['Minimum buffer', eur(+cfg.minBuffer || 0)], isMonthly() ? ['Salaris', 'elke maand op de ' + payDay() + 'e'] : ['Eerste salarisdatum', fmtD(cfg.salaryAnchor)], ['Huidige periode', periodLabel(periodOf(today()))]])) +
+      kv([['Rekening(en)', E(free)], ['Minimum buffer', eur(+cfg.minBuffer || 0)], ['Huidige periode', periodLabel(periodOf(today()))]])) +
     card('Budgetten per periode', 'Telt mee in de begroting', btn('Wijzigen', 'editBudgets', '', 'sm'),
       budgets.length ? kv(budgets.map(([k, v]) => [k, eur(v)])) : '<p class="muted small">Geen budgetten ingesteld.</p>') +
     `</div><div class="cols">` +
     card('Vaste overboekingen', 'Naar je eigen rekeningen, op een vast ritme', btn(icon('plus') + 'Overboeking', 'newTransfer', '', 'sm'),
       all('transfers').length ? `<div class="list">${all('transfers').map(t => `<button type="button" class="li" data-act="editTransfer" data-id="${E(t.id)}"><span class="grow"><b>${E(t.name)}</b><span class="tsub">Elke ${t.intervalDays === 7 ? 'week' : E(t.intervalDays) + ' dagen'} naar ${E(accName(t.toAccountId))}${t.active === false ? ' · gestopt' : ''}</span></span><span class="amt">${eur(t.amount)}</span></button>`).join('')}</div>` : '<p class="muted small">Geen vaste overboekingen.</p>') +
-    card('Salaris', 'Voor de calculator en verwachtingen', btn('Wijzigen', 'editSalarySettings', '', 'sm'),
-      s.mode === 'vast' ? kv([['Soort', 'Vast salaris'], ['Netto per ' + PER(), eur(s.fixedNet)], ...(s.fixedGross ? [['Bruto per ' + PER(), eur(s.fixedGross)]] : [])]) : kv([['Uren per week', nr(s.weeklyHours)], ['Uren per dag', nr(s.hoursPerDay)], ['Loonweken per periode', nr(s.weeks)], ['EJU', nr(s.eju * 100, 2) + '%'], ['Zorgvergoeding per week', eur(s.carePerWeek)], ['Zaterdag / zondag', `${nr(s.saturdayPct * 100)}% / ${nr(s.sundayPct * 100)}%`], ['Verwacht per periode', `${nr(s.expSat ?? 1)} zaterdag · ${nr(s.expSun ?? 1)} zondag`],
-        ...(s.rates || []).slice().sort((a, b) => a.from.localeCompare(b.from)).map(r => ['Uurloon vanaf ' + fmtD(r.from), eur(r.rate)])])) +
+    card('Salaris', 'Stel je salaris in bij Inkomsten', `<button type="button" class="btn sm" data-go="salaris">Naar Inkomsten</button>`,
+      kv([['Netto per maand', eur(salaryAt(nextPayDates(1)[0]).net)], ['Salaris komt', 'elke maand op de ' + payDay() + 'e']])) +
     `</div><div class="cols">` +
     card('Categorieën', '', btn('Wijzigen', 'editCats', '', 'sm'), `<div class="row" style="gap:6px">${(cfg.categories || []).map(c => pill(c)).join('')}</div>`) +
     card('Herkenningsregels', 'Bij importeren eerst toegepast', btn(icon('plus') + 'Regel', 'newRule', '', 'sm'),
@@ -3217,9 +3141,8 @@ ACT.editFree = () => {
   const cfg = C();
   openSheet({ title: 'Vrij te besteden', body: `<div><p class="small muted" style="margin-bottom:8px">Kies de rekening(en) waarop je salaris binnenkomt en vaste lasten afgaan. Overboekingen naar andere rekeningen tellen als uitgaven van deze periode.</p>
       <div class="stack" style="gap:8px">${accountsSorted().filter(a => a.active !== false).map(a => `<label class="chk"><input type="checkbox" name="free[]" value="${E(a.id)}" ${(cfg.freeAccounts || []).includes(a.id) ? 'checked' : ''}><span>${E(a.name)} <span class="muted small">${ROLE[a.role] || ''}</span></span></label>`).join('')}</div></div>
-    <div class="grid2">${F.money('minBuffer', 'Minimum buffer', cfg.minBuffer || 0)}${F.select('payMode', 'Salaris komt', cfg.payMode === 'maand' ? 'maand' : '4weken', [['4weken', 'Elke 4 weken'], ['maand', 'Elke maand']])}
-      ${F.date('salaryAnchor', 'Bij elke 4 weken: een salarisdatum', cfg.salaryAnchor)}${F.num('payDay', 'Bij elke maand: op dag', cfg.payDay || 25, { min: 1, max: 31 })}</div>`,
-    onSubmit: v => saveConfig({ freeAccounts: v.free || [], minBuffer: isFinite(v.minBuffer) ? r2(v.minBuffer) : 0, payMode: v.payMode === 'maand' ? 'maand' : '4weken', salaryAnchor: v.salaryAnchor || cfg.salaryAnchor || today(), payDay: Math.min(31, Math.max(1, Math.round(+v.payDay || 25))) }, 'Instellingen opgeslagen').then(() => { UI.period = null; }) });
+    <div class="grid2">${F.money('minBuffer', 'Minimum buffer', cfg.minBuffer || 0)}</div><p class="small muted" style="margin-top:8px">Je salaris en de salarisdag stel je in bij Inkomsten.</p>`,
+    onSubmit: v => saveConfig({ freeAccounts: v.free || [], minBuffer: isFinite(v.minBuffer) ? r2(v.minBuffer) : 0 }, 'Instellingen opgeslagen').then(() => { UI.period = null; }) });
 };
 ACT.editBudgets = () => {
   const cfg = C(), b = cfg.budgets || {};
@@ -3231,18 +3154,6 @@ ACT.editCats = () => {
   const cfg = C();
   openSheet({ title: 'Categorieën', body: `<label class="f">Eén categorie per regel<textarea name="cats" id="f-cats" rows="14">${E((cfg.categories || []).join('\n'))}</textarea></label><p class="small muted">Bestaande transacties houden hun categorie.</p>`,
     onSubmit: v => saveConfig({ categories: [...new Set(v.cats.split('\n').map(x => x.trim()).filter(Boolean))] }, 'Categorieën opgeslagen') });
-};
-ACT.editSalarySettings = () => {
-  const s = C().salary;
-  const rates = (s.rates || []).slice().sort((a, b) => a.from.localeCompare(b.from));
-  openSheet({ title: 'Salarisinstellingen', body: `<div class="grid2">${F.select('mode', 'Hoe reken je je salaris?', s.mode === 'vast' ? 'vast' : 'uur', [['vast', 'Vast bedrag'], ['uur', 'Uurloon met toeslagen']])}${F.money('fixedNet', 'Vast salaris: netto per keer', s.fixedNet ?? null)}${F.money('fixedGross', 'Vast salaris: bruto per keer (optioneel)', s.fixedGross ?? null)}</div><p class="small muted">De velden hieronder gelden voor "Uurloon met toeslagen".</p><div class="grid2">${F.num('weeklyHours', 'Uren per week', s.weeklyHours)}${F.num('hoursPerDay', 'Uren per dag', s.hoursPerDay)}${F.num('weeks', 'Loonweken per periode', s.weeks)}${F.num('eju', 'EJU (%)', r2(s.eju * 100 * 100) / 100)}
-    ${F.money('carePerWeek', 'Zorgvergoeding per loonweek', s.carePerWeek)}${F.num('saturdayPct', 'Zaterdagtoeslag (%)', s.saturdayPct * 100)}${F.num('sundayPct', 'Zondagtoeslag (%)', s.sundayPct * 100)}${F.num('fallbackFactor', 'Nettofactor zonder loonstroken (%)', r2(s.fallbackFactor * 10000) / 100)}${F.num('expSat', 'Verwachte zaterdagen per periode', s.expSat ?? 1)}${F.num('expSun', 'Verwachte zondagen per periode', s.expSun ?? 1)}</div>
-    <label class="f">Uurlonen (één per regel: datum en uurloon, bijv. "01-10-2026 25,24")<textarea name="rates" id="f-rates" rows="4">${E(rates.map(r => fmtD(r.from) + ' ' + String(r.rate).replace('.', ',')).join('\n'))}</textarea></label>`,
-    onSubmit: v => {
-      const rs = v.rates.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const [d, ...rest] = l.split(/\s+/); return { from: parseDate(d), rate: parseAmount(rest.join(''), { thousands: false }) }; });
-      if (rs.some(r => !r.from || !isFinite(r.rate))) throw new Error('Een uurloonregel is niet goed. Gebruik bijvoorbeeld: 01-10-2026 25,24');
-      return saveConfig({ salary: { ...s, mode: v.mode === 'vast' ? 'vast' : 'uur', fixedNet: isFinite(v.fixedNet) ? r2(v.fixedNet) : null, fixedGross: isFinite(v.fixedGross) ? r2(v.fixedGross) : null, weeklyHours: v.weeklyHours, hoursPerDay: v.hoursPerDay, weeks: v.weeks, eju: (v.eju || 0) / 100, carePerWeek: v.carePerWeek || 0, saturdayPct: (v.saturdayPct || 0) / 100, sundayPct: (v.sundayPct || 0) / 100, fallbackFactor: (v.fallbackFactor || 72) / 100, expSat: isFinite(v.expSat) ? +v.expSat : 1, expSun: isFinite(v.expSun) ? +v.expSun : 1, rates: rs.map(r => ({ ...r, label: (s.rates || []).find(x => x.from === r.from)?.label || '' })) } }, 'Salarisinstellingen opgeslagen').then(() => { UI.calc = null; });
-    } });
 };
 ACT.newTransfer = () => transferForm(null);
 ACT.editTransfer = el => transferForm(S.transfers.get(el.dataset.id));
@@ -3384,18 +3295,25 @@ function calEvents(from, to) {
     if (!onFree && t.accountId !== ccAcc?.id) continue;
     if (t.accountId === ccAcc?.id && t.kind === 'overboeking') continue; // incasso already shown on the bank side
     let kind = 'uit';
+    // only what still exists: a payment for a fixed cost or reservation that has since been removed is not shown as one
+    const fxOk = t.fixedId && S.fixed.get(t.fixedId), resOk = txResIds(t).some(id => S.reservations.get(id));
     if (t.kind === 'inkomst') kind = t.category === 'Salaris' ? 'salaris' : 'inkomst';
-    else if (t.accountId === ccAcc?.id || t.toAccountId === ccAcc?.id) kind = 'cc';
-    else if (t.fixedId) kind = 'vast';
+    else if (ccAcc && (t.accountId === ccAcc.id || t.toAccountId === ccAcc.id)) kind = 'cc'; // only when there is a credit card (else undefined === undefined made every payment one)
+    else if (fxOk) kind = 'vast';
     else if (toA && isRepay(toA)) kind = 'aflos';
-    else if (txResIds(t).length) kind = 'res';
+    else if (resOk) kind = 'res';
     else if (isGrocery(toA)) kind = 'boodschap';
     else if (toA && /betaal/i.test(toA.name)) kind = 'betaal';
     else if (t.kind === 'sparen' || isPot(toA)) kind = 'sparen';
     if (t.kind === 'overboeking' && t.amount > 0 && toA && ids.includes(t.accountId)) kind = isGrocery(toA) ? 'boodschap' : kind;
-    const r0 = txResIds(t).length ? S.reservations.get(txResIds(t)[0]) : null;
-    add(t.date, t.name, t.amount, kind, onFree, false, r0 && !isPot(toA) ? resTileCal(r0) : txTile(t), t.fixedId && S.fixed.get(t.fixedId) ? 'fx:' + t.fixedId : r0 ? 'res:' + r0.id : 'tx:' + t.id);
+    // the calendar shows fixed costs, reservations, savings and income; loose spending (shop, fuel, ...) stays in Transacties
+    if (kind === 'uit' || (kind === 'cc' && !fxOk && !resOk)) continue;
+    const r0 = txResIds(t).map(id => S.reservations.get(id)).find(Boolean) || null;
+    add(t.date, t.name, t.amount, kind, onFree, false, r0 && !isPot(toA) ? resTileCal(r0) : txTile(t), fxOk ? 'fx:' + t.fixedId : r0 ? 'res:' + r0.id : 'tx:' + t.id);
   }
+  // still open on today (due today or earlier): shown on today, so nothing open disappears from the calendar
+  for (const r of all('reservations')) { const o = resOpen(r); if (o > 0 && r.date && r.date <= T) add(T, r.name, -o, 'res', true, true, resTileCal(r), 'res:' + r.id); }
+  for (const x of all('extras')) if (x.status !== 'ontvangen' && +x.amount > 0 && x.date && x.date <= T) add(T, x.name, +x.amount, 'inkomst', true, true, kindTile('in', MC.income), 'pg:salaris');
   // planned (after today)
   const start = T >= from ? addDays(T, 1) : from;
   if (start <= to) {
@@ -3407,7 +3325,7 @@ function calEvents(from, to) {
     for (const r of all('reservations')) { const o = resOpen(r); if (!(o > 0 && r.date)) continue;
       const wk = groceryCalEvents(r, start, to);
       if (wk) wk.forEach(e => add(e.date, r.name + ' (week)', -e.amount, 'res', true, true, resTileCal(r), 'res:' + r.id));
-      else add(r.date < start ? start : r.date, r.name, -o, 'res', true, true, resTileCal(r), 'res:' + r.id); }
+      else if (r.date > T) add(r.date, r.name, -o, 'res', true, true, resTileCal(r), 'res:' + r.id); }
     groceryCalFuture(start, to).forEach(e => add(e.date, 'Boodschappen', -e.amount, 'res', true, true, kindTile('cart', 'var(--sys-green)'), 'pg:reserveringen'));
     for (const tr of all('transfers').filter(t => t.active !== false && !(isGroceryTransfer(t)))) {
       const a = acc(tr.toAccountId);
@@ -3422,11 +3340,10 @@ function calEvents(from, to) {
       k++;
     }
     if (ccAcc) { const b = balance(ccAcc), sd = ccSettleDate(ccAcc); if (b < 0 && sd) add(sd, 'Creditcard incasso', b, 'cc', true, true, kindTile('card', MC.cc), 'pg:transacties'); }
-    { const tm = tankModel(), on = !!(C().car?.tank?.inFree); if (tm.costRefill) tankPlannedDates(start, to, tm).forEach(d => add(d, 'Tanken (verwacht)', -tm.costRefill, 'tank', on, true, kindTile('auto', 'var(--sys-cyan)'), 'pg:auto')); }
     for (const k of kids()) kidIncomeEvents(k, start, to).forEach(e => add(e.date, e.name + ' · ' + k.name, e.amount, 'inkomst', false, true, (kidInTile(e.name)), 'pg:kind'));
     repayEvents(start, to).forEach(e => add(e.date, 'Terugbetaling kinderopvang', e.amount, 'inkomst', true, true, kindTile('in', MC.income), 'pg:salaris'));
     mortgageEvents(start, to).forEach(e => add(e.date, 'Teruggave hypotheekrente', e.amount, 'inkomst', true, true, kindTile('in', MC.income), 'pg:salaris'));
-    for (const x of all('extras')) if (x.status !== 'ontvangen' && +x.amount > 0 && x.date) add(x.date < start ? start : x.date, x.name, +x.amount, 'inkomst', true, true, kindTile('in', MC.income), 'pg:salaris');
+    for (const x of all('extras')) if (x.status !== 'ontvangen' && +x.amount > 0 && x.date && x.date > T) add(x.date, x.name, +x.amount, 'inkomst', true, true, kindTile('in', MC.income), 'pg:salaris');
   }
   // credit-card fixed costs are paid through the incasso; keep them visible but out of the saldo
   return ev.sort((a, b) => a.date.localeCompare(b.date) || a.amount - b.amount);
@@ -3708,90 +3625,17 @@ document.addEventListener('change', e => { if (e.target.matches?.('[data-live="t
 ACT.twTab = el => { UI.twTab = el.dataset.v; $('#tw').outerHTML = tankCard(); };
 ACT.twRound = el => { UI.tw.round = el.dataset.v; twSave(); $('#twBody').innerHTML = twDetourHtml(); $('#facts-tw').innerHTML = twFactsHtml(); };
 
-/* ================= Salaris: meer informatie (i) en weetjes =================
-   Alles komt uit hetzelfde model als "Komende salarissen": uurloon, dagen, EJU, zorgvergoeding, toeslagen en je nettofactor. */
-
-function salaryInfo(d = nextPayDates(1)[0]) {
-  const s = C().salary, nf = netFactor(), f = nf.factor, hpd = +s.hoursPerDay || 8, ejuPct = +s.eju || 0;
-  const iNext = salaryInputs(d), gNext = calcGross(iNext);
-  const iStd = salaryInputs(d, null), gStd = calcGross(iStd);
-  const rate = iStd.rate;
-  const day = hpd * rate * (1 + ejuPct), sat = hpd * rate * (+s.saturdayPct || 0), sun = hpd * rate * (+s.sundayPct || 0);
-  const nextRate = (s.rates || []).filter(r => r.from > d).sort((a, b) => a.from.localeCompare(b.from))[0] || null;
-  const gRaise = nextRate ? calcGross({ ...iStd, rate: nextRate.rate }) : null;
-  // paydays per calendar year with a fixed 4-week rhythm: the first year with 14 payments
-  let year14 = null; { const c = {}; for (let x = C().salaryAnchor || d, i = 0; i < 2000; x = addDays(x, 28), i++) { const y = +x.slice(0, 4); c[y] = (c[y] || 0) + 1; if (c[y] === 14 && y > +today().slice(0, 4)) { year14 = y; break; } } }
-  return { d, s, nf, f, hpd, ejuPct, iNext, gNext, iStd, gStd, rate, day, sat, sun, nextRate, gRaise, year14,
-    netNext: gNext.gross * f, netStd: gStd.gross * f, noEju: gStd.gross - gStd.eju, ejuYear: gStd.eju * periodsPerYear(),
-    hoursYear: (+s.weeklyHours || 36) * 52 };
-}
-function salaryFactsFixed() {
-  const s = C().salary, N = periodsPerYear(), net = +s.fixedNet || 0, gross = +s.fixedGross || 0, F = [];
-  if (!net) return F;
-  F.push({ ic: 'salaris', t: `Per jaar krijg je ≈ ${eur(net * N)} netto: ${N} keer ${eur(net)}.`, u: isMonthly() ? '12 maanden × je netto salaris.' : '52 weken ÷ 4 = 13 uitbetalingen per jaar.', q: isMonthly() ? 'netto jaarsalaris berekenen' : 'hoeveel keer per jaar salaris bij betaling per 4 weken' });
-  if (!isMonthly()) F.push({ ic: 'vastelasten', t: `Omdat een jaar 13 periodes van 4 weken heeft, is je salaris per maand gemiddeld ${eur(net * 13 / 12)} netto.`, u: '× 13 ÷ 12.', q: 'salaris per 4 weken omrekenen naar maand' });
-  if (gross) { F.push({ ic: 'bank', t: `Van elke euro bruto houd je ${nr(net / gross * 100, 0)} cent over. Je werkt dus ≈ ${nr((1 - net / gross) * 52, 0)} weken per jaar voor belasting en premies.`, u: `${eur(net)} netto ÷ ${eur(gross)} bruto.`, q: 'hoeveel procent loonheffing bruto netto' });
-    F.push({ ic: 'sparen', t: `Vakantiegeld is wettelijk minstens 8% van je brutoloon: bij jou ≈ ${eur(gross * N * 0.08)} bruto per jaar.`, u: `8% × ${eur(gross)} × ${N}. Meestal in mei of juni uitbetaald; soms zit het al in je maandloon.`, q: 'vakantiegeld minimaal 8 procent wettelijk' }); }
-  F.push({ ic: 'trend', t: `Elke € 10 die je per ${PER()} spaart, is ${eur(10 * N)} per jaar en ${eur(10 * N * 10)} in tien jaar (zonder rente).`, u: `€ 10 × ${N} periodes × 10 jaar.`, q: 'sparen per maand rekenvoorbeeld' });
-  F.push({ ic: 'gift', t: `De 50/30/20-vuistregel: ±50% voor vaste lasten, 30% voor leuke dingen, 20% sparen. Voor jou: ${eur(net * 0.5)} / ${eur(net * 0.3)} / ${eur(net * 0.2)} per ${PER()}.`, u: 'Een bekende budgetregel; het Nibud geeft ook richtlijnen per huishoudtype.', q: '50 30 20 regel budget' });
-  return F;
-}
-
 /* fixed salary: what you get per period, month and year */
 function salInfoFixed() {
-  const s = C().salary, N = periodsPerYear(), M = N / 12, net = +s.fixedNet || 0, gross = +s.fixedGross || 0, d = nextPayDates(1)[0];
+  const N = periodsPerYear(), M = N / 12, d = nextPayDates(1)[0], sa = salaryAt(d), net = sa.net, gross = sa.gross || 0;
   const cols = isMonthly() ? [['Per maand', 1], ['Per jaar', 12]] : [['Per 4 weken', 1], ['Per maand', M], ['Per jaar', N]];
   const row = (l, v, cls = '') => `<tr class="${cls}"><td>${l}</td>${cols.map(c => `<td class="num">${eur(v * c[1])}</td>`).join('')}</tr>`;
   return `<div class="si-sec"><h3>Volgend salaris · ${fmtLong(d)}</h3><dl class="kv"><dt>Verwacht netto</dt><dd><b>${eur(predictSalary(d))}</b></dd></dl></div>
     <div class="si-sec"><h3>Omgerekend</h3>${isMonthly() ? '' : `<p class="small muted">Er zijn ${N} periodes van 4 weken in een jaar, dus per maand is ${N}/12 = ${nr(M, 3)} keer zoveel.</p>`}
       <div class="tablewrap"><table><thead><tr><th></th>${cols.map(c => `<th class="num">${c[0]}</th>`).join('')}</tr></thead><tbody>${gross ? row('Bruto', gross) : ''}${row('Netto', net, 'si-net')}${gross ? row('Belasting en premies', gross - net) : ''}</tbody></table></div>
-      ${gross ? `<p class="small muted">Van elke euro bruto houd je ${nr(net / gross * 100, 0)} cent over.</p>` : '<p class="small muted">Vul bij Instellingen › Salaris ook je bruto bedrag in, dan zie je hier hoeveel er naar belasting en premies gaat.</p>'}</div>`;
+      ${gross ? `<p class="small muted">Van elke euro bruto houd je ${nr(net / gross * 100, 0)} cent over.</p>` : '<p class="small muted">Vul bij Inkomsten › Salaris ook je bruto bedrag in, dan zie je hier hoeveel er naar belasting en premies gaat.</p>'}</div>`;
 }
-ACT.salInfo = () => {
-  if (C().salary.mode === 'vast') return openSheet({ title: 'Over je salaris', body: salInfoFixed(), noFoot: true, tapOut: true, wide: true });
-  const x = salaryInfo(), f = x.f, N = periodsPerYear(), M = N / 12;
-  const row = (l, a, b, c, cls = '') => `<tr class="${cls}"><td>${l}</td>${isMonthly() ? '' : `<td class="num">${a}</td>`}<td class="num">${b}</td><td class="num">${c}</td></tr>`;
-  const kv = rows => `<dl class="kv">${rows.map(([l, v, c]) => `<dt class="${c || ''}">${l}</dt><dd class="${c || ''}">${v}</dd>`).join('')}</dl>`;
-  const g = x.gNext, raise = x.gRaise ? (x.gRaise.gross - x.gStd.gross) : 0;
-  const body = `
-    <div class="si-sec"><h3>Volgend salaris · ${fmtLong(x.d)}</h3>
-      ${kv([[`Basis · ${nr(x.iNext.hours)} uur × ${eur(x.iNext.rate)}`, eur(g.base)], [`EJU ${nr(x.ejuPct * 100, 1)}%`, eurS(g.eju)], ['Zorgvergoeding', eurS(g.care)],
-        ...(g.sat ? [[`Zaterdagtoeslag (${x.iNext.saturdays}×)`, eurS(g.sat)]] : []), ...(g.sun ? [[`Zondagtoeslag (${x.iNext.sundays}×)`, eurS(g.sun)]] : []),
-        ['Bruto', eur(g.gross), 'tot'], [`Belasting en premies (${pct(1 - f)})`, '−' + eur(g.gross * (1 - f))], ['Netto', eur(x.netNext), 'tot']])}</div>
-    <div class="si-sec"><h3>Omgerekend</h3><p class="small muted">Bij een normaal salaris (${x.iStd.days} dagen, ${x.iStd.saturdays} za, ${x.iStd.sundays} zo).${isMonthly() ? '' : ` Er zijn ${N} periodes van 4 weken in een jaar, dus per maand is ${N}/12 = ${nr(M, 3)} keer zoveel.`}</p>
-      <div class="tablewrap"><table><thead><tr><th></th>${isMonthly() ? '' : '<th class="num">Per 4 weken</th>'}<th class="num">Per maand</th><th class="num">Per jaar</th></tr></thead><tbody>
-        ${row('Bruto', eur(x.gStd.gross), eur(x.gStd.gross * M), eur(x.gStd.gross * N))}
-        ${row('Netto', eur(x.netStd), eur(x.netStd * M), eur(x.netStd * N), 'si-net')}
-        ${row('Bruto zonder EJU', eur(x.noEju), eur(x.noEju * M), eur(x.noEju * N))}
-        ${row('Netto zonder EJU', eur(x.noEju * f), eur(x.noEju * f * M), eur(x.noEju * f * N))}</tbody></table></div></div>
-    <div class="si-sec"><h3>Als je EJU niet elke ${PER()} zou krijgen</h3>
-      <p class="small">Dan is je salaris elke ${PER()} <b>${eur(x.gStd.eju)}</b> bruto lager (≈ ${eur(x.gStd.eju * f)} netto): <b>${eur(x.noEju * f)}</b> netto in plaats van ${eur(x.netStd)}. In december krijg je dan in één keer ${N} × ${eur(x.gStd.eju)} = <b>${eur(x.ejuYear)}</b> bruto. Netto is dat ongeveer ${eur(x.ejuYear * f)}; op een eenmalige uitkering wordt het bijzonder tarief ingehouden, dus het echte bedrag kan wat lager uitvallen. Over het hele jaar krijg je hetzelfde.</p></div>
-    <div class="si-sec"><h3>Wat levert extra werken op?</h3>
-      ${kv([['Een extra doordeweekse dag', `${eurS(x.day)} bruto · ≈ ${eurS(x.day * f)} netto`], [`Zaterdag in plaats van doordeweeks (+${nr(x.s.saturdayPct * 100)}%)`, `${eurS(x.sat)} bruto · ≈ ${eurS(x.sat * f)} netto`],
-        [`Zondag in plaats van doordeweeks (+${nr(x.s.sundayPct * 100)}%)`, `${eurS(x.sun)} bruto · ≈ ${eurS(x.sun * f)} netto`], ['Netto per gewerkt uur', eur(x.netStd / Math.max(1, x.iStd.hours))]])}</div>
-    <div class="si-sec"><h3>Uurloon</h3>
-      ${kv([[`Nu (vanaf ${fmtD((x.s.rates || []).filter(r => r.from <= x.d).sort((a, b) => b.from.localeCompare(a.from))[0]?.from)})`, eur(x.rate)],
-        ...(x.nextRate ? [[`Vanaf ${fmtD(x.nextRate.from)} (${pct(x.nextRate.rate / x.rate - 1)} erbij)`, eur(x.nextRate.rate)], ['Dat scheelt per ' + PER(), `${eurS(raise)} bruto · ≈ ${eurS(raise * f)} netto`]] : [])])}</div>
-    <p class="small muted">Nettofactor ${pct(f)}: ${x.nf.n ? `gemiddeld uit ${x.nf.n} gecontroleerde loonstro${x.nf.n === 1 ? 'ok' : 'ken'}` : 'standaardwaarde'}. De netto bedragen zijn een schatting; je loonstrook is leidend.</p>`;
-  openSheet({ title: 'Over je salaris', body, noFoot: true, tapOut: true, wide: true });
-};
-
-function salaryFacts() {
-  if (C().salary.mode === 'vast') return salaryFactsFixed();
-  const x = salaryInfo(), f = x.f, F = [], N = periodsPerYear();
-  if (!isMonthly()) F.push({ ic: 'vastelasten', t: `Een jaar heeft ${N} periodes van 4 weken. Daardoor is je salaris per maand gemiddeld ${eur(x.netStd * N / 12)} netto, ${eur(x.netStd * N / 12 - x.netStd)} meer dan per 4 weken.`, u: `52 weken ÷ 4 = ${N} uitbetalingen per jaar, verdeeld over 12 maanden: × ${N}/12.`, q: 'hoeveel keer per jaar salaris bij betaling per 4 weken' });
-  if (x.year14 && !isMonthly()) F.push({ ic: 'gift', t: `Eens in de ±22 jaar krijg je 14 keer salaris in één kalenderjaar. Bij jouw betaaldag gebeurt dat voor het eerst in ${x.year14}.`, u: `13 × 4 weken = 364 dagen, één (of twee) dagen korter dan een jaar. Je betaaldag schuift daardoor elk jaar ruim een dag naar voren, tot er 14 uitbetalingen in één jaar vallen. Berekend vanaf je betaaldag ${fmtD(C().salaryAnchor)}.`, q: '14 keer salaris in een jaar vierwekelijkse betaling' });
-  if (x.ejuPct) F.push({ ic: 'gift', t: `Je EJU van ${nr(x.ejuPct * 100, 1)}% is samen bijna precies één extra maandsalaris: ${nr(x.ejuPct * 12 * 100, 1)}% van een maand basisloon, ≈ ${eur(x.ejuYear)} bruto per jaar.`, u: `${nr(x.ejuPct * 100, 1)}% × 12 maanden = ${nr(x.ejuPct * 1200, 1)}%. Een volle "dertiende maand" is 8,33%.`, q: 'eindejaarsuitkering 8,3% dertiende maand' });
-  F.push({ ic: 'sparen', t: `Vakantiegeld is wettelijk minstens 8% van je brutoloon. Over jouw basisloon is dat ≈ ${eur(x.gStd.base * N * 0.08)} bruto per jaar.`, u: `8% × (${eur(x.gStd.base)} × ${N}). Meestal wordt het in mei of juni uitbetaald; dat staat in je cao of contract.`, q: 'vakantiegeld minimaal 8 procent wettelijk' });
-  F.push({ ic: 'bank', t: `Van elke euro bruto houd je ≈ ${nr(f * 100, 0)} cent over. Je werkt dus ≈ ${nr((1 - f) * 52, 0)} weken per jaar voor belasting en premies.`, u: `Nettofactor ${pct(f)} uit je loonstroken. (1 − ${nr(f, 2)}) × 52 weken.`, q: 'hoeveel procent loonheffing bruto netto' });
-  F.push({ ic: 'salaris', t: `Je werkt ≈ ${nr(x.hoursYear, 0)} uur per jaar en verdient netto ≈ ${eur(x.netStd / Math.max(1, x.iStd.hours))} per gewerkt uur.`, u: `${nr(x.s.weeklyHours, 0)} uur × 52 weken. Netto ${eur(x.netStd)} ÷ ${nr(x.iStd.hours, 0)} uur per 4 weken (inclusief EJU, zorgvergoeding en toeslagen).`, q: '36 uur per week hoeveel uur per jaar' });
-  if (x.sun) F.push({ ic: 'in', t: `Een zondag levert jou ≈ ${eur(x.sun * f)} netto meer op dan een doordeweekse dag, een zaterdag ≈ ${eur(x.sat * f)}.`, u: `${nr(x.hpd, 0)} uur × ${eur(x.rate)} × ${nr(x.s.sundayPct * 100)}% (zondag) of ${nr(x.s.saturdayPct * 100)}% (zaterdag), × je nettofactor.`, q: 'zaterdagtoeslag zondagtoeslag berekenen' });
-  if (x.nextRate) F.push({ ic: 'trend', t: `Op ${fmtD(x.nextRate.from)} gaat je uurloon ${pct(x.nextRate.rate / x.rate - 1)} omhoog: ≈ ${eur((x.gRaise.gross - x.gStd.gross) * f * N)} netto extra per jaar.`, u: `(${eur(x.nextRate.rate)} − ${eur(x.rate)}) per uur, doorgerekend over basis, EJU en toeslagen, × ${N} periodes × nettofactor.`, q: 'loonsverhoging procent netto berekenen' });
-  F.push({ ic: 'heart', t: `Je zorgvergoeding van ${eur(x.s.carePerWeek)} per week is ≈ ${eur(x.s.carePerWeek * 52)} bruto per jaar.`, u: `${eur(x.s.carePerWeek)} × 52 loonweken.`, q: 'tegemoetkoming zorgverzekering werkgever cao' });
-  return F;
-}
-function salaryFactsHtml() { return factsHtml(salaryFacts(), 'sal', 'var(--sys-teal)'); }
-FACTS.sal = salaryFactsHtml;
+ACT.salInfo = () => openSheet({ title: 'Over je salaris', body: salInfoFixed(), noFoot: true, tapOut: true, wide: true });
 
 /* ================= Instel-wizard (losse versie) =================
    Bij de eerste keer openen vult iemand stap voor stap zijn eigen situatie in.
@@ -3838,11 +3682,8 @@ function setupView() {
       ${suIn('name', 'Welke naam wil je gebruiken? (optioneel)', s.name, { ph: 'Je voornaam', mode: 'text' })}
       <p class="small muted">Heb je al een back-up? <button type="button" class="link" data-act="restore">Back-up terugzetten</button></p></div>`;
   if (st === 1) body = `<h2>Je salaris</h2><p class="muted small">Hiermee rekent de app je periodes uit: van salaris tot salaris.</p>
-    <div class="grid2">${suSel('payMode', 'Wanneer krijg je salaris?', s.payMode, [['maand', 'Elke maand'], ['4weken', 'Elke 4 weken']])}
-      ${s.payMode === 'maand' ? suIn('payDay', 'Op welke dag van de maand?', s.payDay, { ph: '25', mode: 'numeric', hint: 'Valt die dag op een zaterdag of zondag, dan rekent de app vanzelf met de vrijdag ervoor.' }) : suIn('anchor', 'Een datum waarop je salaris krijgt', s.anchor, { type: 'date', hint: 'Bijvoorbeeld je laatste of je volgende betaaldag.' })}
-      ${suSel('salMode', 'Hoe is je salaris?', s.salMode, [['vast', 'Elke keer (ongeveer) hetzelfde'], ['uur', 'Uurloon, wisselt per keer']])}</div>
-    ${s.salMode === 'vast' ? `<div class="grid2">${suIn('net', `Netto per ${per} (wat er op je rekening komt)`, s.net, { ph: '2.400,00' })}${suIn('gross', `Bruto per ${per} (optioneel)`, s.gross, { ph: '3.200,00', hint: 'Staat op je loonstrook. Dan zie je ook hoeveel belasting je betaalt.' })}</div>`
-      : `<div class="grid2">${suIn('rate', 'Bruto uurloon', s.rate, { ph: '18,50' })}${suIn('hours', 'Uren per week', s.hours, { ph: '36' })}${suIn('eju', 'Eindejaarsuitkering per keer (%) (optioneel)', s.eju, { ph: '0', hint: 'Alleen als je die elke keer meekrijgt, bijv. 8,3%.' })}${suIn('factor', 'Van bruto houd je netto ongeveer (%)', s.factor, { ph: '72', hint: 'Netto ÷ bruto van je loonstrook. Weet je het niet, laat dan 72 staan.' })}</div>`}`;
+    <div class="grid2">${suIn('payDay', 'Op welke dag van de maand krijg je salaris?', s.payDay, { ph: '25', mode: 'numeric', hint: 'Valt die dag op een zaterdag of zondag, dan rekent de app vanzelf met de vrijdag ervoor.' })}</div>
+    <div class="grid2">${suIn('net', 'Netto per maand (wat er op je rekening komt)', s.net, { ph: '2.400,00' })}${suIn('gross', 'Bruto per maand (optioneel)', s.gross, { ph: '3.200,00', hint: 'Staat op je loonstrook. Dan zie je ook hoeveel belasting je betaalt.' })}</div>`;
   if (st === 2) body = `<h2>Je rekeningen</h2><p class="muted small">Vul de saldi in zoals je bank ze vandaag laat zien.</p>
     <div class="grid2">${suIn('mainName', 'Naam van je betaalrekening', s.mainName, { mode: 'text' })}${suIn('mainBal', 'Saldo nu', s.mainBal, { ph: '1.250,00', hint: 'Hierop komt je salaris binnen en gaan je vaste lasten af.' })}</div>
     ${suChk('grocery', 'Ik heb een aparte rekening voor boodschappen', s.grocery)}
@@ -4902,7 +4743,8 @@ VIEWS.kind = () => {
   // 2. allowances, received on the parent's account
   // all allowances, also the ones that do not come in this period (marked as such), like the fixed costs
   const inP0 = it => kidIncomeDates(it, p.start, p.end).length > 0, incM = (k.incomes || []).slice().sort((a, b) => inP0(b) - inP0(a) || (b.amount || 0) - (a.amount || 0)), incOther = 0;
-  const incRows = incM.map(it => `<tr>${nameCell(kidInTile(it.name), 'kidEditIncome', it.id, it.name, [FREQ_TXT[it.freq] || '', 'rond de ' + (it.day || 1) + 'e'].filter(Boolean).join(' · '))}<td class="num pos">+${eur(it.amount)}</td><td class="num">${kidIncomeStatus(k, it, p).html}</td></tr>`).join('');
+  // green with a + only once it has come in (as on Inkomsten); expected amounts stay neutral, so nothing looks paid or received too early
+  const incRows = incM.map(it => { const st = kidIncomeStatus(k, it, p), got = /pill ok/.test(st.html); return `<tr>${nameCell(kidInTile(it.name), 'kidEditIncome', it.id, it.name, [FREQ_TXT[it.freq] || '', 'rond de ' + (it.day || 1) + 'e'].filter(Boolean).join(' · '))}<td class="num${got ? ' pos' : ''}">${got ? '+' : ''}${eur(it.amount)}</td><td class="num">${st.html}</td></tr>`; }).join('');
   // 3. fixed costs, paid from the parent's account
   const costsAll = kidCosts(k), costs = costsAll.filter(x => x.active !== false).sort((a, b) => !!fixedDueInP(b, p) - !!fixedDueInP(a, p) || (b.amount || 0) - (a.amount || 0)); // also the ones not paid in this period, marked as such
   const costRows = costs.map(x => `<tr>${nameCell(fxIcon(x), 'editFixed', x.id, x.name, [x.kind === 'jaar' && x.month ? 'elk jaar in ' + MONTHS[x.month - 1] : x.kind === 'halfjaar' && x.month ? 'elk half jaar, in ' + MONTHS[x.month - 1] + ' en ' + MONTHS[(x.month + 5) % 12] : FREQ_TXT[fxFreq(x)], x.day ? 'rond de ' + x.day + 'e' : ''].filter(Boolean).join(' · '))}<td class="num">${eur(x.amount)}</td><td class="num">${kidCostStatus(x, p)}</td></tr>`).join('');
@@ -5070,16 +4912,21 @@ function incPeriodCard(p, label) {
     ${tr ? `<div class="inc-list">${tr}</div>` : '<p class="small muted">Geen inkomsten in deze periode.</p>'}</div>`;
 }
 function incomeOverview() {
-  const T = today(), cur = periodOf(T), n = UI.incPrev || 3;
-  const prev = []; let q = cur; for (let i = 0; i < n; i++) { q = periodShift(q, -1); prev.push(q); }
-  const next = [periodShift(cur, 1)];
-  return `<div class="row inc-tools"><button type="button" class="btn sm ghost" data-act="editSalarySettings">Salaris instellen</button><button type="button" class="btn sm ghost" data-act="mortgageEdit">Hypotheekrente ${mortgageCfg() ? 'wijzigen' : 'instellen'}</button><button type="button" class="btn sm ghost" data-act="salInfo">Salaris per jaar</button></div>`
+  // this month and the next; more months ahead and earlier periods only when asked for
+  const T = today(), cur = periodOf(T), nNext = 1 + (UI.incNext || 0), nPrev = UI.incPrev || 0;
+  const next = []; let q = cur; for (let i = 0; i < nNext; i++) { q = periodShift(q, 1); next.push(q); }
+  const prev = []; q = cur; for (let i = 0; i < nPrev; i++) { q = periodShift(q, -1); prev.push(q); }
+  return `${salCard()}<div class="row inc-tools"><button type="button" class="btn sm ghost" data-act="mortgageEdit">Hypotheekrente ${mortgageCfg() ? 'wijzigen' : 'instellen'}</button><button type="button" class="btn sm ghost" data-act="salInfo">Salaris per jaar</button></div>`
     + incPeriodCard(cur, 'nu') + next.map(x => incPeriodCard(x, 'komt nog')).join('')
-    + `<h3 class="xh" style="margin:0 0 -8px">Eerdere periodes</h3>` + prev.map(x => incPeriodCard(x)).join('')
-    + `<div style="text-align:center"><button type="button" class="btn" data-act="incMore">Meer tonen</button></div>`
+    + `<div class="inc-more"><button type="button" class="btn" data-act="incNextMore">Volgende maanden tonen</button>${UI.incNext ? '<button type="button" class="btn ghost" data-act="incNextLess">Minder</button>' : ''}</div>`
+    + (nPrev ? `<h3 class="xh" style="margin:0 0 -8px">Eerdere periodes</h3>` + prev.map(x => incPeriodCard(x)).join('') : '')
+    + `<div class="inc-more"><button type="button" class="btn" data-act="incMore">${nPrev ? 'Nog eerdere periodes' : 'Eerdere periodes'}</button>${nPrev ? '<button type="button" class="btn ghost" data-act="incPrevHide">Verbergen</button>' : ''}</div>`
     + (repayCard());
 }
-ACT.incMore = () => { UI.incPrev = (UI.incPrev || 3) + 3; render(); };
+ACT.incMore = () => { UI.incPrev = (UI.incPrev || 0) + 3; render(); };
+ACT.incPrevHide = () => { UI.incPrev = 0; render(); };
+ACT.incNextMore = () => { UI.incNext = (UI.incNext || 0) + 3; render(); };
+ACT.incNextLess = () => { UI.incNext = 0; render(); };
 ACT.salTick = el => {
   const mk = el.dataset.mk, undo = !!el.dataset.undo, p = periodByMk(mk), s = incSalary(p);
   openSheet({ title: 'Salaris ' + fmtLong(p.start), submit: undo ? 'Ja, weer open' : 'Ja, ontvangen', body: undo ? '<p>Het salaris weer op "nog te ontvangen" zetten?</p>' : `<div class="grid2">${F.money('amount', 'Ontvangen bedrag', s.amount, { req: 1 })}</div><p class="small muted">Staat het salaris in je bankbestand, dan gebeurt dit vanzelf.</p>`,
@@ -5128,6 +4975,59 @@ ACT.liefkie = () => {
     onSubmit: v => { if (!(v.amount > 0)) throw new Error('Vul een bedrag in. Liefkie is vast meer dan € 0 waard 🥺');
       return commit(`${LF_NAME} ${mn} gereserveerd 💛`, [{ col: 'reservations', id: uid('res'), data: { name: `${LF_NAME} ${mn}`, type: 'Reservering', date: today(), amount: r2(v.amount), paid: 0, status: 'Gereserveerd', note: v.note || '', liefkie: true } }]); } });
 };
+
+/* ================= Salaris (één plek: Inkomsten, 31-10-2026) =================
+   Vast salaris per maand. Bovenaan het huidige salaris (netto, bruto, percentage) en de salarisdag;
+   daaronder elke wijziging: "vanaf" een maand of "alleen" die maand. Alles tikbaar: wijzigen of verwijderen. */
+const salMonthTxt = mk => `${MONTHS[+mk.slice(5) - 1]} ${mk.slice(0, 4)}`;
+function salCard() {
+  const s = C().salary, ch = salChanges(), now = salaryAt(nextPayDates(1)[0]);
+  const pctTxt = (n, g) => n > 0 && g > 0 ? ` · ${nr(n / g * 100, 1)}% van bruto` : '';
+  const line = (act, id, title, net, gross, sub) => `<button type="button" class="li" data-act="${act}"${id ? ` data-id="${E(id)}"` : ''}><span class="grow"><b>${title}</b><span class="tsub">${sub}</span></span><span class="num"><b>${eur(net)}</b>${gross ? `<span class="tsub">${eur(gross)} bruto</span>` : ''}</span></button>`;
+  const base = line('salBase', '', ch.length ? 'Salaris tot de eerste wijziging' : 'Salaris per maand', +s.fixedNet || 0, +s.fixedGross || 0, `netto${pctTxt(+s.fixedNet, +s.fixedGross)} · komt op de ${payDay()}e (in het weekend de vrijdag ervoor)`);
+  const rows = ch.map(c => line('salChange', c.id, c.once ? `Alleen ${salMonthTxt(c.from)}` : `Vanaf ${salMonthTxt(c.from)}`, +c.net, +c.gross || 0, `netto${pctTxt(+c.net, +c.gross)} · uitbetaald ${fmtShort(payDateIn(c.from))}${c.once ? ', daarna weer het vorige bedrag' : ''}`)).join('');
+  return `<div class="card sal-set"><div class="card-h"><h2>Salaris</h2><div class="row" style="gap:6px"><button type="button" class="btn sm" data-act="salChange">+ Nieuw salaris</button><button type="button" class="btn sm" data-act="newIncome">+ Extra uitkering</button></div></div>
+    <div class="list">${base}${rows}</div>
+    <p class="small muted" style="margin-top:8px">Nu: ${eur(now.net)} netto per maand. Een extra uitkering (bijv. eindejaarsuitkering) verschijnt in de maand waarin je hem verwacht en telt mee in Vrij te besteden.</p></div>`;
+}
+/* netto, percentage and bruto that keep each other up to date (as in a sheet) */
+const salTrio = (net, gross) => { const pct = net > 0 && gross > 0 ? Math.round(net / gross * 10000) / 100 : Math.round((C().salary.fallbackFactor || 0.72) * 10000) / 100;
+  return `${F.money('net', 'Netto per maand', net || null, { req: 1 })}${F.num('pct', 'Netto is … % van bruto', pct, { step: '0.01' })}${F.money('gross', 'Bruto per maand', gross || (net ? r2(net / (pct / 100)) : null))}`; };
+const salTrioLive = (e, form) => { const el = e.target, n = form.elements, num = x => { const v = parseAmount(String(x.value || '')); return isFinite(v) ? v : null; };
+  const net = num(n.net), pct = n.pct.value === '' ? null : parseFloat(n.pct.value), gross = num(n.gross), put = (x, v) => { x.value = v == null || !isFinite(v) ? '' : String(r2(v)).replace('.', ','); };
+  if ((el.name === 'net' || el.name === 'pct') && net > 0 && pct > 0) put(n.gross, net / (pct / 100));
+  else if (el.name === 'gross' && net > 0 && gross > 0) n.pct.value = String(Math.round(net / gross * 10000) / 100); };
+const salTrioRead = v => { if (!(v.net > 0)) throw new Error('Vul het netto salaris in.'); const gross = v.gross > 0 ? r2(v.gross) : v.pct > 0 ? r2(v.net / (v.pct / 100)) : null; return { net: r2(v.net), gross }; };
+/* the salary until the first change, and the pay day */
+ACT.salBase = () => { const s = C().salary;
+  openSheet({ title: 'Salaris per maand', body: `<div class="grid3">${salTrio(+s.fixedNet || 0, +s.fixedGross || 0)}</div><div class="grid2" style="margin-top:10px">${F.num('payDay', 'Salaris komt op dag', payDay(), { step: 1 })}</div>
+    <p class="small muted" style="margin-top:8px">Vul je netto salaris in; het bruto rekent mee met het percentage. Weet je het precieze bruto bedrag, vul dat in: het percentage past zich aan. Valt de salarisdag in het weekend, dan rekent de app met de vrijdag ervoor.${salChanges().length ? ' Dit bedrag geldt tot je eerste wijziging hieronder.' : ''}</p>`,
+    actions: { input: salTrioLive },
+    onSubmit: v => { const t = salTrioRead(v), pd = Math.round(+v.payDay); if (!(pd >= 1 && pd <= 31)) throw new Error('Kies een salarisdag tussen 1 en 31.');
+      return commit('Salaris opgeslagen', [{ col: 'config', id: 'main', data: { ...C(), payMode: 'maand', payDay: pd, salary: { ...C().salary, mode: 'vast', fixedNet: t.net, fixedGross: t.gross, fallbackFactor: t.gross ? Math.round(t.net / t.gross * 10000) / 10000 : C().salary.fallbackFactor } } }]); } });
+};
+/* a new salary from a month on, or for one month only */
+ACT.salChange = (el, e, pre = {}) => { const s = C().salary, c = (s.changes || []).find(x => x.id === el?.dataset?.id) || null;
+  const mk0 = c ? c.from : pre.mk || monthKey(nextPayDates(1)[0]), base = salaryAt(payDateIn(mk0));
+  const opts = []; for (let mk = addMonths(monthKey(today()), -12); mk <= addMonths(monthKey(today()), 24); mk = addMonths(mk, 1)) opts.push([mk, `${cap(salMonthTxt(mk))} (uitbetaald ${fmtShort(payDateIn(mk))})`]);
+  openSheet({ title: c ? 'Salaris wijzigen' : 'Nieuw salaris', body: `<div class="grid2">${F.select('from', 'Salaris van', mk0, opts)}${F.select('once', 'Hoe lang', (c ? c.once : pre.once) ? 'once' : 'from', [['from', 'Vanaf deze maand'], ['once', 'Alleen deze maand']])}</div>
+    <div class="grid3" style="margin-top:10px">${salTrio(c ? +c.net : base.net, c ? +c.gross || 0 : base.gross || 0)}</div>
+    <p class="small muted" style="margin-top:8px"><b>Vanaf deze maand:</b> dit wordt je salaris vanaf die maand; eerdere maanden houden hun bedrag. <b>Alleen deze maand:</b> daarna gaat het terug naar het vorige bedrag.</p>`,
+    extraFoot: c ? delBtn() : '',
+    actions: { input: salTrioLive, delete: () => saveConfig({ salary: { ...C().salary, changes: (C().salary.changes || []).filter(x => x.id !== c.id) } }, 'Salariswijziging verwijderd') },
+    onSubmit: v => { const t = salTrioRead(v), once = v.once === 'once', from = v.from;
+      const rest = (C().salary.changes || []).filter(x => x.id !== c?.id && !(x.from === from && !!x.once === once));
+      const n = { id: c ? c.id : uid('sal'), from, once, net: t.net, gross: t.gross };
+      return saveConfig({ salary: { ...C().salary, mode: 'vast', changes: [...rest, n] } }, `Salaris ${once ? 'alleen' : 'vanaf'} ${salMonthTxt(from)}: ${eur(t.net)}`); } });
+};
+/* tapping an expected salary in a period: change just that month */
+ACT.planSalary = el => { const mk = monthKey(el.dataset.d), c = salChanges().find(x => x.once && x.from === mk); ACT.salChange(c ? { dataset: { id: c.id } } : null, null, { mk, once: true }); };
+/* older data: salary set per pay date (salaryPlan) becomes "alleen deze maand" once */
+let SAL_MIG = false;
+function salPlanMigrate() { const pl = C().salaryPlan || {}, ks = Object.keys(pl).filter(d => pl[d]?.net != null); if (SAL_MIG || BOOT.state !== 'ready' || !ks.length) return; SAL_MIG = true;
+  const ch = [...(C().salary.changes || [])]; ks.forEach(d => { const mk = monthKey(d); if (!ch.some(x => x.once && x.from === mk)) ch.push({ id: uid('sal'), from: mk, once: true, net: r2(+pl[d].net), gross: null }); });
+  commit('Salaris per maand omgezet', [{ col: 'config', id: 'main', data: { ...C(), salaryPlan: {}, salary: { ...C().salary, changes: ch } } }], { log: false }).catch(e => console.warn(e)); }
+{ const base = VIEWS.salaris; VIEWS.salaris = () => { setTimeout(salPlanMigrate, 0); return base(); }; }
 
 /* ================= start ================= */
 readHash();
