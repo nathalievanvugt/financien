@@ -1408,10 +1408,12 @@ function freeToSpend() {
   if (res.length) lines.push({ key: 'res', label: `Open reserveringen (${res.length})`, v: -sum(res) });
   for (const tr of all('transfers')) {
     if (ids.includes(tr.toAccountId)) continue;
-    if (isGroceryTransfer(tr)) continue; // stand-alone: this is the grocery reservation
+    if (isGroceryTransfer(tr)) continue; // stand-alone: counted as Boodschappen below
     const ds = transferDates(tr, addDays(known, 1) > p.start ? addDays(known, 1) : p.start, p.end).filter(d => !activeTx().some(t => Math.abs(diffDays(t.date, d)) <= 3 && Math.abs(Math.abs(t.amount) - tr.amount) < 0.01 && t.kind !== 'inkomst' && (!t.toAccountId || t.toAccountId === tr.toAccountId)));
     if (ds.length) lines.push({ key: 'tr', to: tr.toAccountId, label: `Nog naar ${accName(tr.toAccountId)} (${ds.length}×)`, v: -ds.length * tr.amount });
   }
+  { const gw = typeof groceryInPeriod === 'function' ? groceryInPeriod(p).filter(w => !w.skip && !w.paid && w.date >= known) : []; // boodschappen, like a fixed cost (31-10-2026)
+    if (gw.length) lines.push({ key: 'groc', label: `Boodschappen nog over te maken (${gw.length}×)`, v: -r2(sum(gw, w => w.amount)) }); }
   const sv = p.start > known ? sum(savingAccounts().filter(a => !ids.includes(a.id) && !(a.kid)), a => Math.max(0, (+a.plannedPerPeriod || 0) - savedTo(a, p))) : 0;
   if (sv) lines.push({ key: 'save', label: 'Nog te sparen deze periode', v: -sv });
   lines.push(...kidFreeLinesForParent());
@@ -1440,6 +1442,7 @@ function budgetFor(p) {
   ];
   all('transfers').filter(t => t.active !== false && t.toAccountId && !(isGroceryTransfer(t))).forEach(t => rows.push({ key: (() => { const n = accName(t.toAccountId); return isGroceryName(n) ? 'Boodschappen' : /betaal/i.test(n) ? 'Betaalrekening' : 'Naar ' + n; })(), sub: /betaal|boodschap/i.test(accName(t.toAccountId)) ? `${eur(t.amount)} per ${t.intervalDays === 28 ? '4 weken' : t.intervalDays === 7 ? 'week' : t.intervalDays + ' dagen'}` : 'via ' + accName(t.toAccountId), tone: 'move', plan: transferDates(t, p.start, p.end).length * t.amount,
     real: r2(-sum(activeTx().filter(x => inP(x.date, p) && x.toAccountId === t.toAccountId && x.amount < 0), x => x.amount)) }));
+  { const gw = typeof groceryInPeriod === 'function' ? groceryInPeriod(p).filter(w => !w.skip) : []; if (gw.length) rows.push({ key: 'Boodschappen', sub: `${gw.length} × per week`, tone: 'move', plan: r2(sum(gw, w => w.amount)), real: r2(sum(gw.filter(w => w.paid), w => w.tx ? -w.tx.amount : w.amount)) }); }
   Object.entries(cfg.budgets || {}).forEach(([cat, v]) => { if (+v && !(kids().some(k => k.name === cat))) rows.push({ key: cat, plan: +v, real: catSpent(p, cat) }); });
   rows.push({ key: 'Sparen', tone: 'save', plan: sum(sv, a => +a.plannedPerPeriod || 0), real: sum(sv, a => savedTo(a, p)) });
   const inc = rows[0];
@@ -2393,7 +2396,7 @@ VIEWS.vastelasten = () => {
     periodNav(P, 'fprev', 'fnext', periodLabel(P), 'maand')) +
     topDuo(topCard({ ic: 'vastelasten', label: 'Per maand', amount: eur(perMonth), hint: 'Inclusief jaarabonnementen per maand' }),
       topCard({ ic: 'wallet', label: 'Betaald van salaris ' + fmtShort(P.start), amount: eur(paidAmt), more: `<span class="bar hz-bar"><i style="width:${dueAmt ? Math.min(100, paidAmt / dueAmt * 100).toFixed(1) : 0}%"></i></span>`, hint: `van ${eur(dueAmt)} · ${dueRows2.filter(x => x.paid).length} van ${dueRows2.length} posten` })) + (`<p class="small muted" style="margin:0">Van het salaris van ${fmtLong(P.start)} betaal je alles wat daarna wordt afgeschreven, tot het volgende salaris op ${fmtLong(addDays(P.end, 1))}. Alleen betalingen in deze periode zetten een post op Betaald.</p>`) +
-    (fxDupCard()) + ((group('maand', 'Maandlasten', 'Per maand') + group('abonnement', 'Abonnementen', 'Per maand') + group('aflossen', 'Aflossen', 'Per maand') + group('sparen', 'Sparen (vaste inleg)', 'Per maand') + group('beleggen', 'Beleggen', 'Per maand') + (fxPotsCard()) + group('kwartaal', 'Elke 3 maanden', 'Per keer') + group('halfjaar', 'Elk half jaar', 'Per keer') + group('jaar', 'Eén keer per jaar', 'Per jaar'))) +
+    (fxDupCard()) + ((group('maand', 'Maandlasten', 'Per maand') + group('abonnement', 'Abonnementen', 'Per maand') + group('aflossen', 'Aflossen', 'Per maand') + group('sparen', 'Sparen (vaste inleg)', 'Per maand') + group('beleggen', 'Beleggen', 'Per maand') + (fxPotsCard()) + group('kwartaal', 'Elke 3 maanden', 'Per keer') + group('halfjaar', 'Elk half jaar', 'Per keer') + group('jaar', 'Eén keer per jaar', 'Per jaar')) + groceryFixedCard(P)) +
     (all('fixed').length ? '' : `<div class="card">${emptyState('Nog geen vaste lasten', 'Voeg je huur, verzekeringen en abonnementen toe.')}</div>`);
 };
 ACT.newFixed = () => fixedForm(null);
@@ -2443,28 +2446,29 @@ VIEWS.reserveringen = () => {
   const resHead = k => {
     if (k === 'zonder') return 'Zonder datum'; const m = MONTHS[+k.slice(5, 7) - 1]; return `${cap(m)} ${k.slice(0, 4)} <span class="tsub" style="font-weight:500">1 – ${+dateIn(k, 31).slice(8, 10)} ${m.slice(0, 3)}</span>`;
   };
-  const cardOf = ([k, items]) => `<div class="card"><div class="card-h"><h2>${resHead(k)}</h2><p class="num">${items.length} · open ${eur(sum(items, resOpen))}</p></div>${(() => { const tot = sum(items, r => +r.amount || 0), done = tot - sum(items, resOpen); return tot > 0 ? `<div class="bar res-prog" title="${eur(done)} van ${eur(tot)} afgerond"><i style="width:${(done / tot * 100).toFixed(1)}%"></i></div>` : ''; })()}
-    <div class="tablewrap"><table><thead><tr><th>Naam</th><th class="num">Bedrag</th><th class="num hide-m">Betaald</th><th class="num">Status</th></tr></thead><tbody>
-    ${(items.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.name.localeCompare(b.name))).map(r => `<tr class="click" data-act="editRes" data-id="${E(r.id)}"><td><div class="fx-name">${resIcon(r)}<div><span class="tname">${E(r.name)}</span><div class="tsub">${r.grocery && true && groceryWeekOn() ? groceryResSub(r) : `${E(r.type)}${r.date ? ' · ' + fmtShort(r.date) : ''}${r.note ? ' · ' + E(r.note) : ''}`}</div></div></div></td><td class="num">${eur(r.amount)}</td><td class="num hide-m">${eur(r.status === 'Betaald' ? r.amount : resPaid(r))}</td><td class="num">${resPill(r)}</td></tr>`).join('')}
-    </tbody></table></div></div>`;
-  // like Inkomsten: this month and the next; later and earlier months only when asked for (31-10-2026)
-  const curK = monthKey(today()), lastK = addMonths(curK, 2 + (UI.resNext || 0)), firstK = addMonths(curK, -(UI.resPrev || 0));
+  const cardOf = ([k, items]) => `<div class="card res-month" data-mk="${E(k)}"><div class="card-h"><h2>${resHead(k)}</h2>${items.length ? `<p class="num">${items.length} · open ${eur(sum(items, resOpen))}</p>` : ''}</div>${(() => { const tot = sum(items, r => +r.amount || 0), done = tot - sum(items, resOpen); return tot > 0 ? `<div class="bar res-prog" title="${eur(done)} van ${eur(tot)} afgerond"><i style="width:${(done / tot * 100).toFixed(1)}%"></i></div>` : ''; })()}
+    ${items.length ? `<div class="tablewrap"><table><thead><tr><th>Naam</th><th class="num">Bedrag</th><th class="num hide-m">Betaald</th><th class="num">Status</th></tr></thead><tbody>
+    ${(items.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.name.localeCompare(b.name))).map(r => `<tr class="click" data-act="editRes" data-id="${E(r.id)}"><td><div class="fx-name">${resIcon(r)}<div><span class="tname">${E(r.name)}</span><div class="tsub">${E(r.type)}${r.date ? ' · ' + fmtShort(r.date) : ''}${r.note ? ' · ' + E(r.note) : ''}</div></div></div></td><td class="num">${eur(r.amount)}</td><td class="num hide-m">${eur(r.status === 'Betaald' ? r.amount : resPaid(r))}</td><td class="num">${resPill(r)}</td></tr>`).join('')}
+    </tbody></table></div>` : `<p class="small muted res-empty">Nog niets ingepland.</p>`}
+    ${k !== 'zonder' ? `<div class="res-plan"><button type="button" class="btn sm ghost" data-act="newResIn" data-mk="${E(k)}">${icon('plus')}Inplannen</button></div>` : ''}</div>`;
+  // every month from this one up to December 2027 (at least a year ahead), this month on top; earlier months behind a button (31-10-2026)
+  const curK = monthKey(today()), lastK = resLastMonth(), firstK = addMonths(curK, -(UI.resPrev || 0));
   const ents = Object.entries(byM), isPrev = k => k !== 'zonder' && k < curK;
-  const main = ents.filter(([k]) => !isPrev(k) && (k === 'zonder' || k < lastK)), prevShown = ents.filter(([k]) => isPrev(k) && k >= firstK);
-  const moreNext = ents.some(([k]) => k !== 'zonder' && k >= lastK), prevHidden = ents.filter(([k]) => isPrev(k) && k < firstK), prevOpen = prevHidden.filter(([, items]) => sum(items, resOpen) > 0).length;
-  const cards = main.map(cardOf).join('')
-    + (moreNext || UI.resNext ? `<div class="inc-more">${moreNext ? '<button type="button" class="btn" data-act="resNextMore">Volgende maanden tonen</button>' : ''}${UI.resNext ? '<button type="button" class="btn ghost" data-act="resNextLess">Minder</button>' : ''}</div>` : '')
-    + (prevShown.length ? `<h3 class="xh" style="margin:0 0 -8px">Eerdere maanden</h3>` + prevShown.map(cardOf).join('') : '')
-    + (prevHidden.length || UI.resPrev ? `<div class="inc-more">${prevHidden.length ? `<button type="button" class="btn" data-act="resPrevMore">${UI.resPrev ? 'Nog eerdere maanden' : 'Eerdere maanden'}${prevOpen ? ` (${prevOpen} met nog open)` : ''}</button>` : ''}${UI.resPrev ? '<button type="button" class="btn ghost" data-act="resPrevHide">Verbergen</button>' : ''}</div>` : '');
-  return head('Reserveringen', btn(icon('plus') + 'Reservering', 'newRes', '', 'primary')) + (groceryWeekOn() ? '' : groceryCard()) +
+  const months = []; for (let k = curK; k <= lastK; k = addMonths(k, 1)) months.push(k);
+  ents.forEach(([k]) => { if (k !== 'zonder' && k > lastK) months.push(k); });
+  const main = [...months.map(k => [k, byM[k] || []]), ...(byM.zonder ? [['zonder', byM.zonder]] : [])];
+  const prevShown = ents.filter(([k]) => isPrev(k) && k >= firstK).sort((a, b) => b[0].localeCompare(a[0]));
+  const prevHidden = ents.filter(([k]) => isPrev(k) && k < firstK), prevOpen = prevHidden.filter(([, items]) => sum(items, resOpen) > 0).length;
+  const prevBtn = prevHidden.length || UI.resPrev ? `<div class="inc-more res-prev">${prevHidden.length ? `<button type="button" class="btn" data-act="resPrevMore">${UI.resPrev ? 'Nog eerdere maanden' : 'Eerdere maanden'}${prevOpen ? ` (${prevOpen} met nog open)` : ''}</button>` : ''}${UI.resPrev ? '<button type="button" class="btn ghost" data-act="resPrevHide">Verbergen</button>' : ''}</div>` : '';
+  const cards = prevBtn + (prevShown.length ? prevShown.slice().reverse().map(cardOf).join('') + `<h3 class="xh" style="margin:0 0 -8px">Vanaf deze maand</h3>` : '') + main.map(cardOf).join('');
+  return head('Reserveringen', btn(icon('plus') + 'Reservering', 'newRes', '', 'primary')) +
     (() => { const p = periodOf(today()), inPer = open.filter(r => r.date && r.date <= p.end), later = open.filter(r => !r.date || r.date > p.end);
       const pick = ([w, l, list]) => { const sk = rs.filter(r => r.skip && resOpenRaw(r) > 0 && (w === 'now' ? r.date && r.date <= p.end : !r.date || r.date > p.end)).length; return `<button type="button" class="tag" data-act="resPick" data-w="${w}">${l} <b>${eur(sum(list, resOpen))}</b> · ${list.length} ${list.length === 1 ? 'post' : 'posten'}${sk ? ` · ${sk} uitgevinkt` : ''}</button>`; };
       return topCard({ ic: 'reserveringen', label: 'Openstaand', amount: eur(sum(open, resOpen)), tags: [['now', 'Tot je volgende salaris', inPer], ['later', 'Daarna', later]].map(pick).join(''),
         foot: `<div class="seg"><button type="button" data-act="resv" data-v="open" aria-pressed="${UI.resView === 'open'}">Actueel · ${cur.length}</button><button type="button" data-act="resv" data-v="all" aria-pressed="${UI.resView === 'all'}">Alles · ${rs.length}</button></div>` }); })() +
     (cards || `<div class="card">${emptyState(UI.resView === 'open' ? 'Niets open' : 'Nog geen reserveringen', 'Reserveer geld voor grotere uitgaven en terugbetalingen.')}</div>`);
 };
-ACT.resNextMore = () => { UI.resNext = (UI.resNext || 0) + 3; render(); };
-ACT.resNextLess = () => { UI.resNext = 0; render(); };
+ACT.newResIn = el => { const mk = el.dataset.mk, T = today(); resForm(null, { date: mk === monthKey(T) ? periodOf(T).end < dateIn(mk, 31) ? periodOf(T).end : dateIn(mk, 31) : dateIn(mk, 1) }); };
 ACT.resPrevMore = () => { UI.resPrev = (UI.resPrev || 0) + 3; render(); };
 ACT.resPrevHide = () => { UI.resPrev = 0; render(); };
 ACT.resPick = el => {
@@ -2478,11 +2482,12 @@ ACT.resPick = el => {
 };
 ACT.resv = el => { UI.resView = el.dataset.v; render(); };
 ACT.newRes = () => resForm(null);
-ACT.editRes = el => { const r = S.reservations.get(el.dataset.id); if (r?.grocery && true && groceryWeekOn()) return ACT.groceryEdit(); resForm(r); };
+ACT.editRes = el => resForm(S.reservations.get(el.dataset.id));
 /* repeat a new reservation: [key, label, days, months] */
 const RES_REPEAT = [['once', 'Eenmalig', 0, 0], ['week', 'Elke week', 7, 0], ['month', 'Elke maand', 0, 1], ['2month', 'Elke 2 maanden', 0, 2], ['quarter', 'Elk kwartaal', 0, 3], ['year', 'Elk jaar', 0, 12]];
 /* how far ahead repeating reservations (and the weekly groceries) are made: up to the end of the third month after this one */
-const resHorizon = () => dateIn(addMonths(monthKey(today()), 3), 31);
+const resLastMonth = () => { const a = '2027-12', b = addMonths(monthKey(today()), 12); return a > b ? a : b; };
+const resHorizon = () => dateIn(resLastMonth(), 31);
 /* "doorlopend" reservations: a series in config.resSeries = [{ id, name, amount, type, note, rep, start, until, skip: [dates] }];
    its reservations (id res-s-<series>-<date>) are made ahead up to the horizon, a few months at a time */
 const resSeries = () => C().resSeries || [];
@@ -2494,9 +2499,9 @@ function resSeriesOps() { const ops = [], H = resHorizon();
     ops.push({ col: 'reservations', id, data: { name: s.name, type: s.type || 'Reservering', date: d, deadline: d, amount: +s.amount, paid: 0, status: 'Gereserveerd', note: s.note || '', series: s.id } }); }
   return ops; }
 const resRepeatDate = (d, rep, i) => rep[2] ? addDays(d, rep[2] * i) : dateIn(addMonths(monthKey(d), rep[3] * i), +d.slice(8, 10));
-function resForm(r) {
+function resForm(r, preset = {}) {
   const isNew = !r;
-  r = r || { name: '', type: 'Reservering', date: periodOf(today()).end, amount: null, paid: 0, status: 'Gereserveerd', note: '' };
+  r = r || { name: '', type: 'Reservering', date: periodOf(today()).end, amount: null, paid: 0, status: 'Gereserveerd', note: '', ...preset };
   const linked = isNew ? [] : all('transactions').filter(t => txResIds(t).includes(r.id) && t.status !== 'ignored');
   openSheet({
     title: isNew ? 'Reservering toevoegen' : r.name,
@@ -2518,7 +2523,7 @@ function resForm(r) {
         return commit(`${r.name}: gestopt vanaf ${fmtShort(r.date)}`, [{ col: 'config', id: 'main', data: { ...C(), resSeries: resSeries().map(x => x.id === sr.id ? { ...x, until: addDays(r.date, -1) } : x) } }, ...gone.map(x => ({ col: 'reservations', id: x.id, data: null }))]); },
       delete: () => commit(`${r.name} verwijderd`, [...(r.series ? [{ col: 'config', id: 'main', data: { ...C(), resSeries: resSeries().map(x => x.id === r.series ? { ...x, skip: [...(x.skip || []), r.date] } : x) } }] : []), { col: 'reservations', id: r.id, data: null }, ...all('transactions').filter(t => txResIds(t).includes(r.id)).map(t => { const rest = txResIds(t).filter(id => id !== r.id); return { col: 'transactions', id: t.id, data: { ...t, reservationId: rest[0] || null, reservationIds: rest.length > 1 ? rest : null } }; })]),
       doLinkRes: async b => { const t = S.transactions.get(b.dataset.tx); closeSheet(); const prev = txResIds(t); await commit(`${t.name} gekoppeld aan ${r.name}`, prev.length ? linkOps(t, { type: 'resMulti', ids: [...prev, r.id], id: prev[0], label: r.name }) : linkOps(t, { type: 'res', id: r.id, label: r.name })); },
-      unlinkRes: async b => { const t = S.transactions.get(b.dataset.tx); closeSheet(); const rest = txResIds(t).filter(id => id !== r.id); await commit(`${t.name} ontkoppeld`, [{ col: 'transactions', id: t.id, data: { ...t, reservationId: rest[0] || null, reservationIds: rest.length > 1 ? rest : null, category: rest.length ? t.category : t.kind === 'uitgave' ? 'Overig' : t.category, ...(r.grocery ? { groceryNo: true } : {}) } }, ...resRelinkOps(t, rest)]); } },
+      unlinkRes: async b => { const t = S.transactions.get(b.dataset.tx); closeSheet(); const rest = txResIds(t).filter(id => id !== r.id); await commit(`${t.name} ontkoppeld`, [{ col: 'transactions', id: t.id, data: { ...t, reservationId: rest[0] || null, reservationIds: rest.length > 1 ? rest : null, category: rest.length ? t.category : t.kind === 'uitgave' ? 'Overig' : t.category } }, ...resRelinkOps(t, rest)]); } },
     onSubmit: async v => {
       if (!isFinite(v.amount)) throw new Error('Vul een geldig bedrag in.');
       const base = { ...r, name: v.name, type: v.type, date: v.date, amount: r2(v.amount), paid: v.status === 'Betaald' ? r2(v.amount) : r2(v.paid || 0), status: v.status, deadline: v.date, note: v.note };
@@ -3364,10 +3369,8 @@ function calEvents(from, to) {
       add(due, f.name + (f.kid ? ' · ' + (kidById(f.kid)?.name || '') : ''), -f.amount, f.accountId === ccAcc?.id ? 'cc' : 'vast', ids.includes(f.accountId) && !(f.kid), true, fxIcon(f), 'fx:' + f.id);
     }
     for (const r of all('reservations')) { const o = resOpen(r); if (!(o > 0 && r.date)) continue;
-      const wk = groceryCalEvents(r, start, to);
-      if (wk) wk.forEach(e => add(e.date, r.name + ' (week)', -e.amount, 'res', true, true, resTileCal(r), 'res:' + r.id));
-      else if (r.date > T) add(r.date, r.name, -o, 'res', true, true, resTileCal(r), 'res:' + r.id); }
-    groceryCalFuture(start, to).forEach(e => add(e.date, 'Boodschappen', -e.amount, 'res', true, true, kindTile('cart', 'var(--sys-green)'), 'pg:reserveringen'));
+      if (r.date > T) add(r.date, r.name, -o, 'res', true, true, resTileCal(r), 'res:' + r.id); }
+    groceryCalFuture(start, to).forEach(e => add(e.date, 'Boodschappen', -e.amount, 'boodschap', true, true, kindTile('cart', MC.grocery), 'pg:vastelasten'));
     for (const tr of all('transfers').filter(t => t.active !== false && !(isGroceryTransfer(t)))) {
       const a = acc(tr.toAccountId);
       const bs = isGrocery(a);
@@ -3728,8 +3731,7 @@ function setupView() {
   if (st === 2) body = `<h2>Je rekeningen</h2><p class="muted small">Vul de saldi in zoals je bank ze vandaag laat zien.</p>
     <div class="grid2">${suIn('mainName', 'Naam van je betaalrekening', s.mainName, { mode: 'text' })}${suIn('mainBal', 'Saldo nu', s.mainBal, { ph: '1.250,00', hint: 'Hierop komt je salaris binnen en gaan je vaste lasten af.' })}</div>
     ${suChk('grocery', 'Ik heb een aparte rekening voor boodschappen', s.grocery)}
-    ${s.grocery ? `<div class="grid2 su-sub">${suIn('groceryBal', 'Saldo boodschappenrekening nu', s.groceryBal, { ph: '80,00' })}${suIn('groceryWeek', 'Hoeveel zet je er per week op?', s.groceryWeek, { ph: '100,00' })}</div>` : ''}
-    <div class="su-sub">${suIn('grocPot', 'Hoeveel wil je per maand aan boodschappen uitgeven? (optioneel)', s.grocPot, { ph: '400,00', hint: s.grocery ? 'Je hebt een aparte boodschappenrekening; dat geld telt al mee via je overboekingen. Vul dit alleen in voor boodschappen die je vanaf je betaalrekening of creditcard betaalt. Alleen die gaan van het potje af.' : 'Dit wordt je boodschappenpotje bij Reserveringen. Betalingen bij supermarkten worden er vanzelf van afgehaald.' })}</div>
+    ${s.grocery ? `<div class="grid2 su-sub">${suIn('groceryBal', 'Saldo boodschappenrekening nu', s.groceryBal, { ph: '80,00' })}${suIn('groceryWeek', 'Hoeveel zet je er per week op? (komt bij Vaste lasten)', s.groceryWeek, { ph: '100,00' })}</div>` : ''}
     ${suChk('cc', 'Ik heb een creditcard', s.cc)}
     ${s.cc ? `<div class="grid2 su-sub">${suIn('ccBal', 'Hoeveel staat er nu open op de creditcard?', s.ccBal, { ph: '0,00', hint: 'Het bedrag dat nog afgeschreven moet worden.' })}</div>` : ''}`;
   if (st === 3) body = `<h2>Sparen</h2><p class="muted small">Spaarpotten of spaarrekeningen. Inleg en doel zijn optioneel.</p>
@@ -3857,7 +3859,7 @@ function setupOps(s) {
     for (let i = ops.length - 1; i >= 0; i--) { const o = ops[i]; if (o.col === 'fixed' && !o.data.kid && !o.data.car && spec.has(fxDupKey(o.data))) ops.splice(i, 1); } }
   // kinderopvang typed at Vaste lasten belongs to the child
   if (s.kid && String(s.kidName || '').trim()) ops.forEach(o => { if (o.col === 'fixed' && !o.data.kid && /opvang|\bbso\b|kinderdagverblijf|gastouder/i.test(o.data.name)) o.data.kid = 'kid-1'; });
-  ops.push({ col: 'config', id: 'main', data: { ...D, salary, car, setupDone: true, grocStartSet: true, grocStartV2: true, carFixedDone: true, kidFixDone: true, ownerName: String(s.name || '').trim(), payMode: monthly ? 'maand' : '4weken', payDay: Math.round(n(s.payDay) || 25), salaryAnchor: monthly ? T : s.anchor, freeAccounts: ['acc-main'], minBuffer: r2(n(s.buffer) || 0), budgets, categories, kids: kidsCfg, groceryPot: s.grocery && n(s.groceryWeek) > 0 ? { amount: r2(n(s.groceryWeek) * 52 / 12), week: r2(n(s.groceryWeek)), anchor: T, from: T } : n(s.grocPot) > 0 ? { amount: r2(n(s.grocPot)), from: T } : null, mortgageRefund: s.house && n(s.mortAmt) > 0 ? { day: Math.min(31, Math.max(1, Math.round(n(s.mortDay) || 20))), rates: [{ from: monthKey(T), amount: r2(n(s.mortAmt)) }] } : null, lastBackup: null } });
+  ops.push({ col: 'config', id: 'main', data: { ...D, salary, car, setupDone: true, grocStartSet: true, grocStartV2: true, carFixedDone: true, kidFixDone: true, ownerName: String(s.name || '').trim(), payMode: monthly ? 'maand' : '4weken', payDay: Math.round(n(s.payDay) || 25), salaryAnchor: monthly ? T : s.anchor, freeAccounts: ['acc-main'], minBuffer: r2(n(s.buffer) || 0), budgets, categories, kids: kidsCfg, groceryPot: s.grocery && n(s.groceryWeek) > 0 ? { week: r2(n(s.groceryWeek)), anchor: T, from: T, until: null, weeks: {} } : null, mortgageRefund: s.house && n(s.mortAmt) > 0 ? { day: Math.min(31, Math.max(1, Math.round(n(s.mortDay) || 20))), rates: [{ from: monthKey(T), amount: r2(n(s.mortAmt)) }] } : null, lastBackup: null } });
   return ops;
 }
 ACT.suFinish = async () => {
@@ -4091,191 +4093,142 @@ function kidIncomeForm(it) {
 ACT.kidNewIncome = () => kidIncomeForm(null);
 ACT.kidEditIncome = el => { const k = curKid(); kidIncomeForm((k?.incomes || []).find(x => x.id === el.dataset.id)); };
 
-/* ================= Boodschappenpotje =================
-   config.groceryPot = { amount (per maand), from (vanaf welke datum betalingen meetellen) }
-   Elke periode is er een reservering "Boodschappen" (id res-bood-<start>). Betalingen bij supermarkten worden
-   daar vanzelf aan gekoppeld en krijgen de categorie Boodschappen; wat over is telt als gereserveerd.
-   Na afloop van de periode gaat de reservering op Betaald. */
-const groceryPot = () => { const g = C().groceryPot; return g && (+g.amount > 0 || +g.week > 0) ? g : null; };
-/* stand-alone: a fixed amount every week (e.g. € 150, continuously from a first date): the dates of a period */
-function groceryWeekDates(g, p) {
-  if (!(+g.week > 0) || !g.anchor) return [];
-  const n = Math.ceil(diffDays(p.start, g.anchor) / 7), out = [];
-  for (let d = addDays(g.anchor, 7 * n); d <= p.end; d = addDays(d, 7)) if (d >= p.start && d >= g.anchor) out.push(d); // nothing before the first transfer
-  return out;
-}
-const groceryPerPeriod = (g, p = periodOf(today())) => +g.week > 0 && g.anchor ? r2(+g.week * groceryWeekDates(g, p).length) : r2(isMonthly() ? +g.amount : +g.amount * 12 / 13);
-/* a weekly transfer of the set amount, around one of the dates */
-/* stand-alone, weekly: grocery money = a transfer of exactly the weekly amount, or any transfer to the groceries account
-   (an own account with "boodschap" in its name), from the free account(s). Supermarket payments do not count. */
-const groceryWeekCand = (g, t) => +t.amount < 0 && freeAccIds().includes(t.accountId) && !(txKid(t)) &&
-  (Math.abs(+t.amount + +g.week) < 0.01 || (!!t.toAccountId && isGrocery(acc(t.toAccountId))));
-const groceryWeekTx = (g, d) => activeTx().filter(t => groceryWeekCand(g, t) && Math.abs(diffDays(t.date, d)) <= 3).sort((a, b) => Math.abs(diffDays(a.date, d)) - Math.abs(diffDays(b.date, d)))[0] || null;
-/* stand-alone, weekly: the standing transfer to the groceries account is the grocery reservation itself, so it is not counted twice */
-const groceryWeekOn = () => { const g = groceryPot(); return !!g && +g.week > 0 && !!g.anchor; };
+/* ================= Boodschappen (terugkerend, bij Vaste lasten) =================
+   31-10-2026: boodschappen zijn geen reserveringen meer. Ze staan bij Vaste lasten onder "Terugkerende reserveringen".
+   config.groceryPot = { week (bedrag per week), anchor (eerste keer, bepaalt de dag), until (null = doorlopend),
+     weeks: { 'YYYY-MM-DD': { amount, skip, paid, extra } } }  -- per week aan te passen.
+   Elke week gaat het bedrag naar de boodschappenrekening; per periode tellen de weken die nog niet zijn overgemaakt
+   mee in Vrij te besteden, net als een vaste last. */
+const groceryPot = () => { const g = C().groceryPot; return g && +g.week > 0 && g.anchor ? g : null; };
+const groceryWeekOn = () => !!groceryPot();
 // the standing weekly transfer to the groceries account (by name, or the one from the start wizard, or 7 days with the weekly amount)
 const isGroceryTransfer = tr => !!tr && groceryWeekOn() && (isGrocery(acc(tr.toAccountId)) || tr.id === 'tr-grocery' || (+tr.intervalDays === 7 && Math.abs(+tr.amount - +groceryPot().week) < 0.01));
-/* calendar: weekly grocery reservations are separate reservations already (nothing special) */
-function groceryCalEvents(r, start, to) { return null; }
-/* calendar: the Fridays after this period (their reservations are made when that period starts) */
-function groceryCalFuture(start, to) {
-  if (!groceryWeekOn()) return []; const g = groceryPot(), from = addDays(periodOf(today()).end, 1), out = [];
-  for (let d = g.anchor; d <= to; d = addDays(d, 7)) if (d >= from && d >= start && (!g.until || d <= g.until) && !S.reservations.get(groceryWeekResId(d))) out.push({ date: d, amount: r2(+g.week) });
-  return out;
+/* the weeks between two dates: the schedule (every 7 days from the first time, up to "tot en met") plus extra times */
+function groceryWeeksRaw(g, from, to) {
+  const ov = g.weeks || {}, out = [], end = g.until && g.until < to ? g.until : to;
+  const n = Math.max(0, Math.ceil(diffDays(from, g.anchor) / 7));
+  for (let d = addDays(g.anchor, 7 * n); d <= end; d = addDays(d, 7)) if (d >= from) out.push(d);
+  Object.entries(ov).forEach(([d, o]) => { if (o && o.extra && d >= from && d <= to && !out.includes(d)) out.push(d); });
+  return out.sort().map(d => { const o = ov[d] || {}; return { date: d, amount: r2(o.amount != null ? +o.amount : +g.week), skip: !!o.skip, manual: !!o.paid, extra: !!o.extra }; });
 }
-/* stand-alone, weekly: one reservation per week (id res-bood-w-<date>), "Betaald" once the transfer for that week is in */
-const groceryWeekResId = d => 'res-bood-w-' + d;
-function groceryWeekOps(g) {
-  const T = today(), p = periodOf(T), ops = [], seen = new Map();
-  const put = (id, data) => { seen.set(id, data); const i = ops.findIndex(o => o.id === id && o.col === 'reservations'); if (i >= 0) ops[i].data = data; else ops.push({ col: 'reservations', id, data }); };
-  // the weeks from the first transfer on: ahead up to three months after this one (so the coming months show them too),
-  // or up to the end date when one is set ("tot en met"); without an end date it keeps going ("doorlopend")
-  const endW = g.until && g.until < resHorizon() ? g.until : resHorizon();
-  const weeks = []; for (let d = g.anchor; d <= endW; d = addDays(d, 7)) weeks.push(d);
-  // old reservations per period (and supermarket payments on them) go
-  const oldIds = new Set(all('reservations').filter(r => r.grocery && !r.groceryWeek).map(r => r.id));
-  oldIds.forEach(id => ops.push({ col: 'reservations', id, data: null }));
-  const txUpd = new Map(), txOf = t => txUpd.get(t.id) || t;
-  activeTx().filter(t => txResIds(t).some(id => oldIds.has(id) || S.reservations.get(id)?.groceryWeek) && (txResIds(t).some(id => oldIds.has(id)) || !groceryWeekCand(g, t))).forEach(t =>
-    txUpd.set(t.id, { ...t, reservationId: null, reservationIds: null, category: ['Reserveringen', 'Boodschappen'].includes(t.category) ? 'Overig' : t.category }));
-  // link transfers to the nearest week without a transfer (3 days; 6 for a transfer to the groceries account)
-  const linked = new Map(); // week -> tx
-  activeTx().forEach(t => { const x = txOf(t), id = txResIds(x).find(i => /^res-bood-w-/.test(i)); if (id) linked.set(id.slice(11), x); });
-  activeTx().map(txOf).filter(t => !txResIds(t).length && groceryWeekCand(g, t) && t.date >= addDays(g.anchor, -3) && !t.fixedId && !t.noLink && !t.groceryNo && ['uitgave', 'overboeking'].includes(t.kind)).sort((a, b) => a.date.localeCompare(b.date)).forEach(t => {
+/* grocery money: a transfer of the weekly amount (or the amount of that week), or any transfer to the groceries account,
+   from the free account(s). Supermarket payments do not count. */
+const groceryCand = (g, t, amts) => +t.amount < 0 && freeAccIds().includes(t.accountId) && !(txKid(t)) && !t.groceryNo && !t.fixedId && !txResIds(t).length &&
+  (amts.some(a => Math.abs(+t.amount + a) < 0.01) || (!!t.toAccountId && isGrocery(acc(t.toAccountId))));
+/* each transfer goes to the nearest week (3 days; 6 for a transfer to the groceries account), one per week */
+let GROC_MEMO = null;
+function groceryMatch(g) {
+  const key = STATE_V + '|' + JSON.stringify(g) + '|' + today();
+  if (GROC_MEMO && GROC_MEMO.key === key) return GROC_MEMO.map;
+  const weeks = groceryWeeksRaw(g, addDays(g.anchor, -7), addDays(today(), 400)), amts = [...new Set([+g.week, ...weeks.map(w => w.amount)])];
+  const map = new Map();
+  activeTx().filter(t => groceryCand(g, t, amts) && t.date >= addDays(g.anchor, -3)).sort((a, b) => a.date.localeCompare(b.date)).forEach(t => {
     const win = t.toAccountId && isGrocery(acc(t.toAccountId)) ? 6 : 3;
-    const d = weeks.filter(w => !linked.has(w) && Math.abs(diffDays(t.date, w)) <= win).sort((a, b) => Math.abs(diffDays(a, t.date)) - Math.abs(diffDays(b, t.date)))[0];
-    if (!d) return; linked.set(d, t); txUpd.set(t.id, { ...t, reservationId: groceryWeekResId(d), reservationIds: null });
+    const w = weeks.filter(w => !w.skip && !map.has(w.date) && Math.abs(diffDays(t.date, w.date)) <= win).sort((a, b) => Math.abs(diffDays(a.date, t.date)) - Math.abs(diffDays(b.date, t.date)))[0];
+    if (w) map.set(w.date, t);
   });
-  // the reservations themselves
-  for (const d of weeks) {
-    const id = groceryWeekResId(d), r = S.reservations.get(id), t = linked.get(d), ended = periodOf(d).end < p.start;
-    const data = { name: 'Boodschappen', type: 'Reservering', date: d, amount: r && t ? +r.amount : r2(+g.week), paid: 0, status: 'Gereserveerd', note: '', grocery: true, groceryWeek: d, ...(r ? { status: r.status === 'Betaald' && !t ? 'Gereserveerd' : r.status } : {}),
-      // a week of a period that is over without a transfer does not count any more
-      skip: !t && ended };
-    if (!r || ['name', 'date', 'amount', 'status', 'grocery', 'groceryWeek', 'skip'].some(k => (r[k] ?? null) !== (data[k] ?? null))) put(id, { ...(r || {}), ...data });
-  }
-  // weeks that are no longer in the schedule (amount or first date changed) and have no transfer
-  all('reservations').filter(r => r.groceryWeek && !weeks.includes(r.groceryWeek) && !linked.has(r.groceryWeek)).forEach(r => ops.push({ col: 'reservations', id: r.id, data: null }));
-  txUpd.forEach((data, id) => ops.push({ col: 'transactions', id, data }));
+  GROC_MEMO = { key, map }; return map;
+}
+function groceryWeeks(from, to) {
+  const g = groceryPot(); if (!g) return [];
+  const m = groceryMatch(g);
+  return groceryWeeksRaw(g, from, to).map(w => { const tx = m.get(w.date) || null; return { ...w, tx, paid: !w.skip && (!!tx || w.manual) }; });
+}
+const groceryInPeriod = p => groceryWeeks(p.start, p.end);
+/* calendar: the weeks still to come */
+function groceryCalFuture(start, to) { return groceryWeeks(start, to).filter(w => !w.skip && !w.paid).map(w => ({ date: w.date, amount: w.amount })); }
+
+/* one time: grocery reservations go (they were reservations up to 31-10-2026); payments linked to them are unlinked */
+function groceryCleanOps() {
+  const ops = [], gone = new Set(all('reservations').filter(r => r.grocery || r.groceryWeek || /^res-bood-/.test(r.id)).map(r => r.id));
+  gone.forEach(id => ops.push({ col: 'reservations', id, data: null }));
+  if (gone.size) activeTx().filter(t => txResIds(t).some(id => gone.has(id))).forEach(t => { const rest = txResIds(t).filter(id => !gone.has(id));
+    ops.push({ col: 'transactions', id: t.id, data: { ...t, reservationId: rest[0] || null, reservationIds: rest.length > 1 ? rest : null, category: !rest.length && t.category === 'Reserveringen' ? (t.kind === 'uitgave' ? 'Boodschappen' : 'Overig') : t.category } }); });
+  // a pot per month (supermarket payments) no longer exists: only the weekly grocery money
+  const g = C().groceryPot; if (g && !(+g.week > 0 && g.anchor)) ops.push({ col: 'config', id: 'main', data: { ...C(), groceryPot: null } });
   return ops;
 }
 /* stand-alone, one time (agreed 26-10-2026): the grocery money (€ 150, or the weekly amount already set) is transferred
-   every Friday, starting Friday 30 October 2026. Weeks before that are not reserved. Afterwards Arjan can change it himself. */
+   every Friday, starting Friday 30 October 2026. Weeks before that are not counted. Afterwards Arjan can change it himself. */
 const GROC_START = '2026-10-30';
 function groceryStartOps() {
-  // v2 (27-10-2026): also when the first date was already set to another day (e.g. Sunday 25 Oct): every Friday from 30 Oct
   const cfg = C(); if (!cfg.setupDone || (cfg.grocStartSet && cfg.grocStartV2) || (cfg.grocStartSet && cfg.groceryPot?.anchor === GROC_START)) return [];
   const g = cfg.groceryPot || {}, week = +g.week > 0 ? r2(+g.week) : 150;
-  const ops = [{ col: 'config', id: 'main', data: { ...cfg, grocStartSet: true, grocStartV2: true, groceryPot: { amount: r2(week * 52 / 12), week, anchor: GROC_START, from: GROC_START } } }];
+  const ops = [{ col: 'config', id: 'main', data: { ...cfg, grocStartSet: true, grocStartV2: true, groceryPot: { ...g, week, anchor: GROC_START, from: GROC_START } } }];
   all('transfers').filter(t => t.active !== false && (isGrocery(acc(t.toAccountId)) || t.id === 'tr-grocery')).forEach(t => ops.push({ col: 'transfers', id: t.id, data: { ...t, amount: week, intervalDays: 7, start: GROC_START } }));
   return ops;
 }
-/* stand-alone: a weekly standing transfer to the groceries account (from the start wizard) switches the grocery money to weekly mode */
+/* stand-alone: a weekly standing transfer to the groceries account (from the start wizard) switches the grocery money on */
 function groceryWeekMigrateOps() {
   if (groceryWeekOn()) return [];
   const tr = all('transfers').find(t => t.active !== false && +t.intervalDays === 7 && +t.amount > 0 && isGrocery(acc(t.toAccountId)));
   if (!tr) return [];
   const first = activeTx().filter(t => +t.amount < 0 && t.toAccountId === tr.toAccountId && freeAccIds().includes(t.accountId)).sort((a, b) => a.date.localeCompare(b.date))[0];
   const anchor = first ? first.date : (tr.start || today());
-  return [{ col: 'config', id: 'main', data: { ...C(), groceryPot: { amount: r2(+tr.amount * 52 / 12), week: r2(+tr.amount), anchor, from: periodOf(anchor).start } } }];
-}
-const isSupermarket = t => TXK[0][0].test(txText(t));
-const groceryResId = p => 'res-bood-' + p.start;
-function groceryPotOps() {
-  const g = groceryPot(); if (!g) return [];
-  if (groceryWeekOn()) return groceryWeekOps(g);
-  const T = today(), p = periodOf(T), ops = [], made = new Set(), amt = groceryPerPeriod(g, p);
-  const ensure = pp => {
-    const id = groceryResId(pp), r = S.reservations.get(id);
-    if (!r && !made.has(id)) { made.add(id); ops.push({ col: 'reservations', id, data: { name: 'Boodschappen', type: 'Reservering', date: pp.start, amount: groceryPerPeriod(g, pp), paid: 0, status: pp.start < p.start ? 'Betaald' : 'Gereserveerd', note: 'Boodschappenpotje', grocery: true } }); }
-    return id;
-  };
-  ensure(p);
-  const cur = S.reservations.get(groceryResId(p));
-  if (cur && cur.grocery && +cur.amount !== amt) ops.push({ col: 'reservations', id: cur.id, data: { ...cur, amount: amt } });
-  if (groceryWeekOn()) {
-    all('reservations').filter(r => r.grocery && r.date && r.date >= addDays(g.anchor, -35) && r.id !== cur?.id).forEach(r => { const a = groceryPerPeriod(g, periodOf(r.date)); if (+r.amount !== a) ops.push({ col: 'reservations', id: r.id, data: { ...r, amount: a } }); });
-    activeTx().filter(t => txResIds(t).some(id => S.reservations.get(id)?.grocery) && !groceryWeekCand(g, t)).forEach(t => ops.push({ col: 'transactions', id: t.id, data: { ...t, reservationId: null, reservationIds: null, category: ['Reserveringen', 'Boodschappen'].includes(t.category) ? 'Overig' : t.category } }));
-  }
-  // finished periods: the pot is closed, what was left over is free again
-  all('reservations').filter(r => r.grocery && r.date < p.start && r.status !== 'Betaald').forEach(r => ops.push({ col: 'reservations', id: r.id, data: { ...r, status: 'Betaald' } }));
-  // supermarket payments since the pot was switched on
-  // weekly mode: the weekly transfers of exactly that amount are the grocery money
-  if (+g.week > 0) for (const t of activeTx()) {
-    if (!groceryWeekCand(g, t) || t.date < (g.from || T) || t.fixedId || t.noLink || t.groceryNo || txResIds(t).length) continue;
-    if (!['uitgave', 'overboeking'].includes(t.kind)) continue;
-    const pp = periodOf(t.date); if (!(t.toAccountId && isGrocery(acc(t.toAccountId))) && !groceryWeekDates(g, pp).some(d => Math.abs(diffDays(t.date, d)) <= 3)) continue;
-    ops.push({ col: 'transactions', id: t.id, data: { ...t, reservationId: ensure(pp), reservationIds: null, category: t.kind === 'uitgave' ? 'Reserveringen' : t.category } });
-  }
-  if (!(+g.week > 0)) for (const t of activeTx()) {
-    if (!(t.amount < 0) || t.kind !== 'uitgave' || t.date < (g.from || T) || t.fixedId || t.noLink || t.groceryNo || txResIds(t).length) continue;
-    if (t.category && !['Overig', 'Boodschappen', ...(['Reserveringen'])].includes(t.category)) continue;
-    if (!isSupermarket(t)) continue;
-    // stand-alone: only from the free-to-spend account(s) or a credit card; a separate groceries account is already counted as transfers
-    if (!(freeAccIds().includes(t.accountId) || acc(t.accountId)?.role === 'creditcard')) continue;
-    ops.push({ col: 'transactions', id: t.id, data: { ...t, reservationId: ensure(periodOf(t.date)), reservationIds: null, category: 'Reserveringen' } });
-  }
-  return ops;
-}
-/* reservations list: "Boodschappen · 5 × € 150 per week · 2 van 5 overgemaakt" */
-function groceryResSub(r) {
-  const t = activeTx().find(x => txResIds(x).includes(r.id));
-  return `Week van ${fmtShort(r.groceryWeek || r.date)} · ${t ? 'overgemaakt ' + fmtShort(t.date) : r.skip ? 'niet overgemaakt' : r.date <= today() ? 'nog niet gezien' : 'verwacht'}`;
+  return [{ col: 'config', id: 'main', data: { ...C(), groceryPot: { week: r2(+tr.amount), anchor, from: anchor, until: null, weeks: {} } } }];
 }
 let GROC_BUSY = false;
 function groceryAuto() {
   if (GROC_BUSY || BOOT.state !== 'ready') return;
+  const run = (msg, ops) => { GROC_BUSY = true; commit(msg, ops, { log: false }).catch(e => console.warn(e)).finally(() => { GROC_BUSY = false; setTimeout(groceryAuto, 0); }); };
+  const clean = groceryCleanOps(); if (clean.length) return run('Boodschappen naar Vaste lasten', clean);
   const mig = groceryStartOps().length ? groceryStartOps() : groceryWeekMigrateOps();
-  if (mig.length) { GROC_BUSY = true; commit('Boodschappen per week', mig, { log: false }).catch(e => console.warn(e)).finally(() => { GROC_BUSY = false; setTimeout(groceryAuto, 0); }); return; }
-  const sops = resSeriesOps(); if (sops.length) { GROC_BUSY = true; commit('Reeksen bijgewerkt', sops, { log: false }).catch(e => console.warn(e)).finally(() => { GROC_BUSY = false; setTimeout(groceryAuto, 0); }); return; }
-  if (!groceryPot()) return;
-  const ops = groceryPotOps(); if (!ops.length) return;
-  GROC_BUSY = true; commit('Boodschappenpotje', ops, { log: false }).catch(e => console.warn(e)).finally(() => { GROC_BUSY = false; });
+  if (mig.length) return run('Boodschappen per week', mig);
+  const sops = resSeriesOps(); if (sops.length) return run('Reeksen bijgewerkt', sops);
 }
-function groceryCard() {
+
+/* Vaste lasten: "Terugkerende reserveringen" with the groceries of this period, week by week */
+const WEEKDAYS = ['zondag', 'maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag'];
+const wdOf = d => new Date(d + 'T12:00:00').getDay();
+function groceryFixedCard(P) {
   const g = groceryPot();
-  if (!g) return `<div class="card groc"><div class="card-h"><h2><span class="ict" style="--ic:var(--sys-green)">${icon('cart')}</span>Boodschappenpotje</h2><button type="button" class="btn sm" data-act="groceryEdit">Instellen</button></div>
-    <p class="small muted">Kies hoeveel je per maand aan boodschappen wilt uitgeven. Betalingen bij supermarkten worden er dan vanzelf van afgehaald.</p></div>`;
-  const p = periodOf(today()), r = S.reservations.get(groceryResId(p)), amt = r ? +r.amount : groceryPerPeriod(g, p);
-  if (+g.week > 0 && g.anchor) return groceryWeekCard(g, p, amt);
-  const txs = activeTx().filter(t => txResIds(t).includes(groceryResId(p))).sort((a, b) => b.date.localeCompare(a.date));
-  const spent = -sum(txs, t => t.amount), left = amt - spent, pct = amt > 0 ? Math.min(100, spent / amt * 100) : 0;
-  const daysLeft = diffDays(p.end, today()) + 1;
-  return `<div class="card groc"><div class="card-h"><h2><span class="ict" style="--ic:var(--sys-green)">${icon('cart')}</span>Boodschappenpotje</h2><button type="button" class="btn sm" data-act="groceryEdit">Wijzigen</button></div>
-    <div class="groc-top"><div><span class="tw-k">${left >= 0 ? 'Nog over' : 'Te veel uitgegeven'}</span><b class="tw-big ${left < 0 ? 'neg' : ''}">${eur(Math.abs(left))}</b></div><div class="groc-meta"><span>${eur(spent)} van ${eur(amt)}</span><span>nog ${daysLeft} ${daysLeft === 1 ? 'dag' : 'dagen'}${left > 0 ? ` · ± ${eur(left / daysLeft)} per dag` : ''}</span></div></div>
-    <div class="bar"><i class="${left < 0 ? 'over' : ''}" style="width:${pct.toFixed(1)}%"></i></div>
-    ${txs.length ? `<div class="list" style="margin-top:8px">${txs.slice(0, 6).map(t => `<button type="button" class="li" data-act="editTx" data-id="${E(t.id)}"><span class="grow"><b>${E(t.name)}</b><span class="tsub">${fmtShort(t.date)}</span></span><span class="amt">${eur(-t.amount)}</span></button>`).join('')}</div>${txs.length > 6 ? `<p class="small muted">en nog ${txs.length - 6} betalingen</p>` : ''}`
-      : '<p class="small muted" style="margin-top:8px">Nog geen boodschappen deze periode. Betalingen bij Albert Heijn, Jumbo, Lidl, Aldi, Plus, Dirk en andere supermarkten komen hier vanzelf bij.</p>'}
-    <p class="small muted" style="margin-top:8px">${isMonthly() ? '' : `Per periode van 4 weken: ${eur(amt)} (${eur(g.amount)} per maand × 12/13). `}Wat nog over is, telt als gereserveerd in Vrij te besteden.</p></div>`;
+  const headH = `<div class="card-h"><h2>Terugkerende reserveringen</h2>${g ? '' : '<button type="button" class="btn sm" data-act="groceryEdit">Boodschappen instellen</button>'}</div>`;
+  if (!g) return `<div class="card groc-fx">${headH}<p class="small muted">Zet hier je boodschappengeld per week, bijvoorbeeld elke vrijdag € 150 naar je boodschappenrekening.</p></div>`;
+  const ws = groceryInPeriod(P), on = ws.filter(w => !w.skip), tot = r2(sum(on, w => w.amount)), T = today();
+  const rows = ws.map(w => {
+    const st = w.skip ? pill('Overgeslagen') : w.tx ? `<button type="button" class="pill ok" data-act="editTx" data-id="${E(w.tx.id)}">Overgemaakt ${fmtShort(w.tx.date)}</button><div class="tsub">uit bankbestand</div>`
+      : w.manual ? pill('Betaald', 'ok') + '<div class="tsub">met de hand</div>' : w.date <= T ? '<span class="pill warn">Nog niet gezien</span>' : '<span class="small muted">Verwacht</span>';
+    const sub = [cap(WEEKDAYS[wdOf(w.date)]) + ' ' + fmtShort(w.date), w.extra ? 'extra keer' : '', !w.extra && Math.abs(w.amount - +g.week) >= 0.01 ? 'aangepast' : ''].filter(Boolean).join(' · ');
+    return `<tr class="click${w.skip ? ' fx-off' : ''}" data-act="groceryWeek" data-d="${E(w.date)}"><td><div class="fx-name">${kindTile('cart', 'var(--sys-green)')}<div><span class="tname">Boodschappen</span><div class="tsub">${E(sub)}</div></div></div></td><td class="num">${eur(w.amount)}</td><td class="num">${st}</td></tr>`;
+  }).join('');
+  const wd = WEEKDAYS[wdOf(g.anchor)];
+  return `<div class="card groc-fx">${headH}
+    <div class="card-h" style="margin-top:2px"><h3 style="margin:0">Boodschappen</h3><p class="num">${on.length} × ${on.length && on.every(w => w.amount === on[0].amount) ? eur(on[0].amount) : 'per week'} = <b>${eur(tot)}</b></p></div>
+    ${rows ? `<div class="tablewrap"><table><thead><tr><th>Week</th><th class="num">Bedrag</th><th class="num">Status</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="small muted">Geen boodschappen in deze periode.</p>'}
+    <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button type="button" class="btn sm" data-act="groceryEdit">Wijzigen</button><button type="button" class="btn sm ghost" data-act="groceryExtra">${icon('plus')}Extra keer</button></div>
+    <p class="small muted" style="margin-top:8px">Elke ${wd} ${eur(g.week)} naar de boodschappenrekening${g.until ? ', tot en met ' + fmtLong(g.until) : ', doorlopend'}. Een periode loopt van salaris tot salaris, dus soms is het 4 en soms 5 keer. Klopt een week niet? Tik erop om het bedrag aan te passen of hem over te slaan. Wat nog niet is overgemaakt, telt mee in Vrij te besteden.</p></div>`;
 }
-function groceryWeekCard(g, p, amt) {
-  const ds = groceryWeekDates(g, p), T = today();
-  const rows = ds.map(d => { const t = groceryWeekTx(g, d);
-    return `<tr><td><div class="fx-name">${kindTile('cart', 'var(--sys-green)')}<div><span class="tname">Week van ${fmtShort(d)}</span><div class="tsub">${d === T ? 'vandaag' : d < T ? fmtLong(d) : 'komt nog'}</div></div></div></td><td class="num${t ? ' pos' : ''}">${eur(g.week)}</td><td class="num">${t ? `<button type="button" class="pill ok" data-act="editTx" data-id="${E(t.id)}">Overgemaakt ${fmtShort(t.date)}</button>` : d <= T ? '<span class="pill warn">Nog niet gezien</span>' : '<span class="small muted">Verwacht</span>'}</td></tr>`; }).join('');
-  const done = ds.filter(d => groceryWeekTx(g, d)).length;
-  return `<div class="card groc"><div class="card-h"><h2><span class="ict" style="--ic:var(--sys-green)">${icon('cart')}</span>Boodschappen</h2><button type="button" class="btn sm" data-act="groceryEdit">Wijzigen</button></div>
-    <div class="rp-figs"><div><span class="tw-k">Deze periode</span><b>${eur(amt)}</b></div><div><span class="tw-k">Per week</span><b>${eur(g.week)}</b></div><div><span class="tw-k">Overgemaakt</span><b class="pos">${done} van ${ds.length}</b></div></div>
-    <p class="small muted" style="margin:6px 0 4px">${periodLabel(p)}: ${ds.length} keer ${eur(g.week)} = ${eur(amt)}. Gemiddeld ${eur(g.week * 52 / 12)} per maand.</p>
-    ${rows ? `<div class="tablewrap"><table><thead><tr><th>Week</th><th class="num">Bedrag</th><th class="num">Status</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
-    <p class="small muted" style="margin-top:8px">Elke week ${eur(g.week)}, doorlopend vanaf ${fmtLong(g.anchor)}. Een periode loopt van salaris tot salaris, dus soms vallen er 4 en soms 5 weken in. Wat nog niet is overgemaakt, telt als gereserveerd in Vrij te besteden.</p></div>`;
-}
+const grocerySaveWeek = (d, o, msg) => { const g = groceryPot(), weeks = { ...(g.weeks || {}) }; if (o) weeks[d] = o; else delete weeks[d]; return saveConfig({ groceryPot: { ...g, weeks } }, msg); };
+ACT.groceryWeek = el => {
+  const g = groceryPot(); if (!g) return; const d = el.dataset.d, w = groceryWeeks(d, d)[0]; if (!w) return;
+  openSheet({ title: 'Boodschappen ' + fmtShort(d), body: `<div class="grid2">${F.money('amount', 'Bedrag deze week', w.amount, { req: 1 })}
+      ${F.check('skip', 'Deze week overslaan (telt niet mee)', w.skip, { cls: 'span2' })}
+      ${w.tx ? '' : F.check('paid', 'Al overgemaakt (met de hand afvinken)', w.manual, { cls: 'span2' })}</div>
+      ${w.tx ? `<p class="small muted">Gezien in je bankbestand: ${fmtLong(w.tx.date)}, ${eur(-w.tx.amount)}.</p>` : ''}
+      <p class="small muted">Dit verandert alleen deze week. Het bedrag voor elke week pas je aan met Wijzigen.</p>`,
+    extraFoot: w.extra ? delBtn() : '',
+    actions: { delete: () => grocerySaveWeek(d, null, 'Extra keer verwijderd') },
+    onSubmit: v => { if (!isFinite(v.amount) || v.amount < 0) throw new Error('Vul een geldig bedrag in.');
+      const o = { ...(w.extra ? { extra: true } : {}), ...(Math.abs(v.amount - +g.week) >= 0.01 || w.extra ? { amount: r2(v.amount) } : {}), ...(v.skip ? { skip: true } : {}), ...(!w.tx && v.paid ? { paid: true } : {}) };
+      return grocerySaveWeek(d, Object.keys(o).length ? o : null, 'Boodschappen ' + fmtShort(d) + ' opgeslagen'); } });
+};
+ACT.groceryExtra = () => { const g = groceryPot(); if (!g) return;
+  openSheet({ title: 'Extra keer boodschappen', body: `<div class="grid2">${F.date('date', 'Datum', today(), { req: 1 })}${F.money('amount', 'Bedrag', g.week, { req: 1 })}</div>`,
+    onSubmit: v => { if (!v.date) throw new Error('Kies een datum.'); if (!isFinite(v.amount) || !(v.amount > 0)) throw new Error('Vul een geldig bedrag in.');
+      if (groceryWeeksRaw(g, v.date, v.date).length) throw new Error('Op die datum staan al boodschappen. Tik op die week om hem aan te passen.');
+      return grocerySaveWeek(v.date, { extra: true, amount: r2(v.amount) }, 'Extra keer boodschappen toegevoegd'); } }); };
 ACT.groceryEdit = () => {
-  const g = groceryPot() || {};
-  { const p = periodOf(today()), mode = +g.week > 0 ? 'week' : 'maand';
-    return openSheet({ title: 'Boodschappen', body: `<div class="grid2">${F.select('mode', 'Hoe gaat het boodschappengeld?', mode, [['week', 'Een vast bedrag per week'], ['maand', 'Een bedrag per maand']], { cls: 'span2' })}
-        ${F.money('week', 'Bedrag per week', g.week ?? 150, { ph: '150,00', when: 'mode=week' })}${F.date('anchor', 'Eerste keer overgemaakt op', g.anchor || dateIn(monthKey(p.start), payDay()), { when: 'mode=week' })}
-        ${F.select('dur', 'Hoe lang', g.until ? 'until' : 'forever', [['forever', 'Doorlopend (geen einde)'], ['until', 'Tot en met een datum']], { when: 'mode=week' })}${F.date('until', 'Tot en met', g.until || '', { when: 'dur=until' })}
-        ${F.money('amount', 'Bedrag per maand', g.amount ?? null, { ph: '400,00', when: 'mode=maand' })}</div>
-      <p class="small muted">Per week: het loopt elke 7 dagen door, los van de maand. Per periode (salaris tot salaris) telt de app hoeveel keer er wordt overgemaakt: 4 of 5 keer. Laat het bedrag leeg om het uit te zetten.</p>`,
-      onSubmit: v => { const week = v.mode === 'week' && isFinite(v.week) && v.week > 0 ? r2(v.week) : null, amount = v.mode === 'maand' && isFinite(v.amount) && v.amount > 0 ? r2(v.amount) : null;
-        if (!week && !amount) return commit('Boodschappen uit', [{ col: 'config', id: 'main', data: { ...C(), groceryPot: null } }, ...all('reservations').filter(r => r.grocery && r.date >= periodOf(today()).start && !activeTx().some(t => txResIds(t).includes(r.id))).map(r => ({ col: 'reservations', id: r.id, data: null }))]);
-        const until = week && v.dur === 'until' ? v.until || null : null; if (week && v.dur === 'until' && !until) throw new Error('Kies tot en met welke datum.');
-        return saveConfig({ groceryPot: { amount: amount || r2(week * 52 / 12), week, anchor: week ? (v.anchor || today()) : null, from: g.from || (week ? v.anchor : null) || today(), until } }, 'Boodschappen ingesteld'); } }); }
-  openSheet({ title: 'Boodschappenpotje', body: `<div class="grid2">${F.money('amount', 'Hoeveel wil je per maand aan boodschappen uitgeven?', g.amount ?? null, { ph: '400,00' })}</div>
-      <p class="small muted">Betalingen bij supermarkten vanaf ${fmtLong(g.from || today())} krijgen de categorie Boodschappen en worden van het potje afgehaald. Laat leeg en sla op om het potje uit te zetten.</p>`,
-    onSubmit: v => { const amount = isFinite(v.amount) && v.amount > 0 ? r2(v.amount) : null;
-      if (!amount) return commit('Boodschappenpotje uit', [{ col: 'config', id: 'main', data: { ...C(), groceryPot: null } }, ...all('reservations').filter(r => r.grocery && r.date >= periodOf(today()).start && !activeTx().some(t => txResIds(t).includes(r.id))).map(r => ({ col: 'reservations', id: r.id, data: null }))]);
-      return saveConfig({ groceryPot: { amount, from: g.from || today() } }, 'Boodschappenpotje ingesteld'); } });
+  const g = C().groceryPot || {}, cur = +g.week > 0 && g.anchor ? wdOf(g.anchor) : 5;
+  openSheet({ title: 'Boodschappen', body: `<div class="grid2">${F.money('week', 'Bedrag per week', g.week ?? 150, { ph: '150,00' })}
+      ${F.select('wd', 'Elke', String(cur), WEEKDAYS.map((n, i) => [String(i), n]).slice(1).concat([['0', 'zondag']]))}
+      ${F.date('anchor', 'Vanaf', g.anchor || today())}
+      ${F.select('dur', 'Hoe lang', g.until ? 'until' : 'forever', [['forever', 'Doorlopend (geen einde)'], ['until', 'Tot en met een datum']])}${F.date('until', 'Tot en met', g.until || '', { when: 'dur=until' })}</div>
+    <p class="small muted">Laat het bedrag leeg om de boodschappen uit te zetten. Aanpassingen per week blijven staan.</p>`,
+    onSubmit: v => { const week = isFinite(v.week) && v.week > 0 ? r2(v.week) : null;
+      if (!week) return saveConfig({ groceryPot: null }, 'Boodschappen uit');
+      let a = v.anchor || today(); while (wdOf(a) !== +v.wd) a = addDays(a, 1);
+      const until = v.dur === 'until' ? v.until || null : null; if (v.dur === 'until' && !until) throw new Error('Kies tot en met welke datum.');
+      return saveConfig({ groceryPot: { ...g, week, anchor: a, from: g.from || a, until, weeks: g.weeks || {}, amount: undefined } }, 'Boodschappen ingesteld'); } });
 };
 
 /* ================= Nico apart (alleen de losse versie) =================
