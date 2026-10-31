@@ -2438,10 +2438,19 @@ VIEWS.reserveringen = () => {
   const resHead = k => {
     if (k === 'zonder') return 'Zonder datum';const pp = periodOf(k);return `${cap(MONTHS[+pp.end.slice(5, 7) - 1])} ${pp.end.slice(0, 4)} <span class="tsub" style="font-weight:500">${periodLabel(pp)}</span>`;
   };
-  const cards = Object.entries(byM).map(([k, items]) => `<div class="card"><div class="card-h"><h2>${resHead(k)}</h2><p class="num">${items.length} · open ${eur(sum(items, resOpen))}</p></div>${(() => { const tot = sum(items, r => +r.amount || 0), done = tot - sum(items, resOpen); return tot > 0 ? `<div class="bar res-prog" title="${eur(done)} van ${eur(tot)} afgerond"><i style="width:${(done / tot * 100).toFixed(1)}%"></i></div>` : ''; })()}
+  const cardOf = ([k, items]) => `<div class="card"><div class="card-h"><h2>${resHead(k)}</h2><p class="num">${items.length} · open ${eur(sum(items, resOpen))}</p></div>${(() => { const tot = sum(items, r => +r.amount || 0), done = tot - sum(items, resOpen); return tot > 0 ? `<div class="bar res-prog" title="${eur(done)} van ${eur(tot)} afgerond"><i style="width:${(done / tot * 100).toFixed(1)}%"></i></div>` : ''; })()}
     <div class="tablewrap"><table><thead><tr><th>Naam</th><th class="num">Bedrag</th><th class="num hide-m">Betaald</th><th class="num">Status</th></tr></thead><tbody>
     ${(items.slice().sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.name.localeCompare(b.name))).map(r => `<tr class="click" data-act="editRes" data-id="${E(r.id)}"><td><div class="fx-name">${resIcon(r)}<div><span class="tname">${E(r.name)}</span><div class="tsub">${r.grocery && true && groceryWeekOn() ? groceryResSub(r) : `${E(r.type)}${r.date ? ' · ' + fmtShort(r.date) : ''}${r.note ? ' · ' + E(r.note) : ''}`}</div></div></div></td><td class="num">${eur(r.amount)}</td><td class="num hide-m">${eur(r.status === 'Betaald' ? r.amount : resPaid(r))}</td><td class="num">${resPill(r)}</td></tr>`).join('')}
-    </tbody></table></div></div>`).join('');
+    </tbody></table></div></div>`;
+  // like Inkomsten: this period and the next; later periods and earlier periods only when asked for (31-10-2026)
+  const P0 = periodOf(today()), curK = P0.start, lastK = periodShift(P0, 2 + (UI.resNext || 0)).start, firstK = periodShift(P0, -(UI.resPrev || 0)).start;
+  const ents = Object.entries(byM), isPrev = k => k !== 'zonder' && k < curK;
+  const main = ents.filter(([k]) => !isPrev(k) && (k === 'zonder' || k < lastK)), prevShown = ents.filter(([k]) => isPrev(k) && k >= firstK);
+  const moreNext = ents.some(([k]) => k !== 'zonder' && k >= lastK), prevHidden = ents.filter(([k]) => isPrev(k) && k < firstK), prevOpen = prevHidden.filter(([, items]) => sum(items, resOpen) > 0).length;
+  const cards = main.map(cardOf).join('')
+    + (moreNext || UI.resNext ? `<div class="inc-more">${moreNext ? '<button type="button" class="btn" data-act="resNextMore">Volgende maanden tonen</button>' : ''}${UI.resNext ? '<button type="button" class="btn ghost" data-act="resNextLess">Minder</button>' : ''}</div>` : '')
+    + (prevShown.length ? `<h3 class="xh" style="margin:0 0 -8px">Eerdere periodes</h3>` + prevShown.map(cardOf).join('') : '')
+    + (prevHidden.length || UI.resPrev ? `<div class="inc-more">${prevHidden.length ? `<button type="button" class="btn" data-act="resPrevMore">${UI.resPrev ? 'Nog eerdere periodes' : 'Eerdere periodes'}${prevOpen ? ` (${prevOpen} met nog open)` : ''}</button>` : ''}${UI.resPrev ? '<button type="button" class="btn ghost" data-act="resPrevHide">Verbergen</button>' : ''}</div>` : '');
   return head('Reserveringen', btn(icon('plus') + 'Reservering', 'newRes', '', 'primary')) + (groceryWeekOn() ? '' : groceryCard()) +
     (() => { const p = periodOf(today()), inPer = open.filter(r => r.date && r.date <= p.end), later = open.filter(r => !r.date || r.date > p.end);
       const pick = ([w, l, list]) => { const sk = rs.filter(r => r.skip && resOpenRaw(r) > 0 && (w === 'now' ? r.date && r.date <= p.end : !r.date || r.date > p.end)).length; return `<button type="button" class="tag" data-act="resPick" data-w="${w}">${l} <b>${eur(sum(list, resOpen))}</b> · ${list.length} ${list.length === 1 ? 'post' : 'posten'}${sk ? ` · ${sk} uitgevinkt` : ''}</button>`; };
@@ -2449,6 +2458,10 @@ VIEWS.reserveringen = () => {
         foot: `<div class="seg"><button type="button" data-act="resv" data-v="open" aria-pressed="${UI.resView === 'open'}">Actueel · ${cur.length}</button><button type="button" data-act="resv" data-v="all" aria-pressed="${UI.resView === 'all'}">Alles · ${rs.length}</button></div>` }); })() +
     (cards || `<div class="card">${emptyState(UI.resView === 'open' ? 'Niets open' : 'Nog geen reserveringen', 'Reserveer geld voor grotere uitgaven en terugbetalingen.')}</div>`);
 };
+ACT.resNextMore = () => { UI.resNext = (UI.resNext || 0) + 3; render(); };
+ACT.resNextLess = () => { UI.resNext = 0; render(); };
+ACT.resPrevMore = () => { UI.resPrev = (UI.resPrev || 0) + 3; render(); };
+ACT.resPrevHide = () => { UI.resPrev = 0; render(); };
 ACT.resPick = el => {
   const p = periodOf(today()), now = el.dataset.w === 'now';
   const list = all('reservations').filter(r => resOpenRaw(r) > 0 && (now ? r.date && r.date <= p.end : !r.date || r.date > p.end)).sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'));
