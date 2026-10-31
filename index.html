@@ -2481,6 +2481,18 @@ ACT.newRes = () => resForm(null);
 ACT.editRes = el => { const r = S.reservations.get(el.dataset.id); if (r?.grocery && true && groceryWeekOn()) return ACT.groceryEdit(); resForm(r); };
 /* repeat a new reservation: [key, label, days, months] */
 const RES_REPEAT = [['once', 'Eenmalig', 0, 0], ['week', 'Elke week', 7, 0], ['month', 'Elke maand', 0, 1], ['2month', 'Elke 2 maanden', 0, 2], ['quarter', 'Elk kwartaal', 0, 3], ['year', 'Elk jaar', 0, 12]];
+/* how far ahead repeating reservations (and the weekly groceries) are made: up to the end of the third month after this one */
+const resHorizon = () => dateIn(addMonths(monthKey(today()), 3), 31);
+/* "doorlopend" reservations: a series in config.resSeries = [{ id, name, amount, type, note, rep, start, until, skip: [dates] }];
+   its reservations (id res-s-<series>-<date>) are made ahead up to the horizon, a few months at a time */
+const resSeries = () => C().resSeries || [];
+const resSeriesId = (sid, d) => `res-s-${sid}-${d}`;
+function resSeriesDates(s, to) { const rep = RES_REPEAT.find(x => x[0] === s.rep) || RES_REPEAT[2], end = s.until && s.until < to ? s.until : to, out = [];
+  for (let i = 0; i < 600; i++) { const d = resRepeatDate(s.start, rep, i); if (d > end) break; out.push(d); } return out; }
+function resSeriesOps() { const ops = [], H = resHorizon();
+  for (const s of resSeries()) for (const d of resSeriesDates(s, H)) { const id = resSeriesId(s.id, d); if (S.reservations.get(id) || (s.skip || []).includes(d)) continue;
+    ops.push({ col: 'reservations', id, data: { name: s.name, type: s.type || 'Reservering', date: d, deadline: d, amount: +s.amount, paid: 0, status: 'Gereserveerd', note: s.note || '', series: s.id } }); }
+  return ops; }
 const resRepeatDate = (d, rep, i) => rep[2] ? addDays(d, rep[2] * i) : dateIn(addMonths(monthKey(d), rep[3] * i), +d.slice(8, 10));
 function resForm(r) {
   const isNew = !r;
@@ -2490,7 +2502,9 @@ function resForm(r) {
     title: isNew ? 'Reservering toevoegen' : r.name,
     body: `<div class="grid2">${F.text('name', 'Naam', r.name, { req: 1, cls: 'span2' })}
       ${F.money('amount', 'Bedrag', r.amount, { req: 1 })}${F.date('date', 'Uiterlijk betalen op', r.date, { req: 1 })}
-      ${isNew ? F.select('repeat', 'Herhalen', 'once', RES_REPEAT.map(x => [x[0], x[1]])) + F.num('times', 'Hoeveel keer in totaal', 12, { step: 1, when: 'repeat=week|month|2month|quarter|year' }) : ''}</div>
+      ${isNew ? F.select('repeat', 'Herhalen', 'once', RES_REPEAT.map(x => [x[0], x[1]])) + F.select('dur', 'Hoe lang', 'forever', [['forever', 'Doorlopend (geen einde)'], ['until', 'Tot en met een datum'], ['times', 'Een aantal keer']], { when: 'repeat=week|month|2month|quarter|year' })
+        + F.date('until', 'Tot en met', '', { when: 'dur=until' }) + F.num('times', 'Hoeveel keer in totaal', 12, { step: 1, when: 'dur=times' }) : ''}</div>
+      ${!isNew && r.series ? (() => { const sr = resSeries().find(x => x.id === r.series); return sr ? `<div class="notice info" style="margin-top:10px"><span>Hoort bij een reeks: ${(RES_REPEAT.find(x => x[0] === sr.rep) || RES_REPEAT[2])[1].toLowerCase()}, ${sr.until ? 'tot en met ' + fmtShort(sr.until) : 'doorlopend'}.</span><button type="button" class="btn sm" data-arm="seriesStop">Stoppen vanaf deze</button></div>` : ''; })() : ''}
       <p class="small muted" style="margin-top:6px">De datum bepaalt in welke periode het bedrag meetelt bij Vrij te besteden.</p>
       <details class="res-more"${!isNew && (r.status !== 'Gereserveerd' || +r.paid > 0 || r.note || r.type !== 'Reservering') ? ' open' : ''}><summary>Meer: status, al betaald, notitie</summary>
       <div class="grid2" style="margin-top:10px">${F.select('status', 'Status', r.status, RES_STATUSES)}${F.money('paid', 'Al betaald', r.paid)}${F.select('type', 'Soort', r.type, ['Reservering', 'Aflossing'])}
@@ -2499,14 +2513,23 @@ function resForm(r) {
       ${linked.length ? `<div><h3 style="margin-bottom:4px">Gekoppelde betalingen</h3>${linked.map(t => `<div class="cand"><span>${fmtD(t.date)} · ${E(t.name)}</span><span class="num">${eur(-t.amount)}</span><button type="button" class="btn sm ghost" data-act="unlinkRes" data-tx="${E(t.id)}">Ontkoppelen</button></div>`).join('')}</div>` : ''}
       ${!isNew && resOpen(r) > 0 ? (() => { const cs = txCandidates(t => r.date && diffDays(t.date, r.date) >= -20 && diffDays(t.date, r.date) <= 90, t => resScore(r, norm(t.name + ' ' + (t.description || '')), -t.amount, t.date) * 10 - Math.abs(diffDays(t.date, r.date)) / 10); return `<div><h3 style="margin-bottom:4px">Betaling koppelen</h3>${cs.length ? cs.map(c => candRow(c.t, 'doLinkRes')).join('') : '<p class="small muted">Geen losse betalingen rond deze datum gevonden.</p>'}</div>`; })() : ''}`,
     extraFoot: isNew ? '' : delBtn(),
-    actions: { delete: () => commit(`${r.name} verwijderd`, [{ col: 'reservations', id: r.id, data: null }, ...all('transactions').filter(t => txResIds(t).includes(r.id)).map(t => { const rest = txResIds(t).filter(id => id !== r.id); return { col: 'transactions', id: t.id, data: { ...t, reservationId: rest[0] || null, reservationIds: rest.length > 1 ? rest : null } }; })]),
+    actions: { seriesStop: () => { const sr = resSeries().find(x => x.id === r.series); if (!sr) return;
+        const gone = all('reservations').filter(x => x.series === sr.id && x.date >= r.date && resOpenRaw(x) > 0 && +x.paid === 0 && !activeTx().some(t => txResIds(t).includes(x.id)));
+        return commit(`${r.name}: gestopt vanaf ${fmtShort(r.date)}`, [{ col: 'config', id: 'main', data: { ...C(), resSeries: resSeries().map(x => x.id === sr.id ? { ...x, until: addDays(r.date, -1) } : x) } }, ...gone.map(x => ({ col: 'reservations', id: x.id, data: null }))]); },
+      delete: () => commit(`${r.name} verwijderd`, [...(r.series ? [{ col: 'config', id: 'main', data: { ...C(), resSeries: resSeries().map(x => x.id === r.series ? { ...x, skip: [...(x.skip || []), r.date] } : x) } }] : []), { col: 'reservations', id: r.id, data: null }, ...all('transactions').filter(t => txResIds(t).includes(r.id)).map(t => { const rest = txResIds(t).filter(id => id !== r.id); return { col: 'transactions', id: t.id, data: { ...t, reservationId: rest[0] || null, reservationIds: rest.length > 1 ? rest : null } }; })]),
       doLinkRes: async b => { const t = S.transactions.get(b.dataset.tx); closeSheet(); const prev = txResIds(t); await commit(`${t.name} gekoppeld aan ${r.name}`, prev.length ? linkOps(t, { type: 'resMulti', ids: [...prev, r.id], id: prev[0], label: r.name }) : linkOps(t, { type: 'res', id: r.id, label: r.name })); },
       unlinkRes: async b => { const t = S.transactions.get(b.dataset.tx); closeSheet(); const rest = txResIds(t).filter(id => id !== r.id); await commit(`${t.name} ontkoppeld`, [{ col: 'transactions', id: t.id, data: { ...t, reservationId: rest[0] || null, reservationIds: rest.length > 1 ? rest : null, category: rest.length ? t.category : t.kind === 'uitgave' ? 'Overig' : t.category, ...(r.grocery ? { groceryNo: true } : {}) } }, ...resRelinkOps(t, rest)]); } },
     onSubmit: async v => {
       if (!isFinite(v.amount)) throw new Error('Vul een geldig bedrag in.');
       const base = { ...r, name: v.name, type: v.type, date: v.date, amount: r2(v.amount), paid: v.status === 'Betaald' ? r2(v.amount) : r2(v.paid || 0), status: v.status, deadline: v.date, note: v.note };
-      const rep = isNew ? RES_REPEAT.find(x => x[0] === v.repeat) || RES_REPEAT[0] : RES_REPEAT[0], n = rep[0] === 'once' ? 1 : Math.round(+v.times || 0);
-      if (rep[0] !== 'once' && !(n >= 2 && n <= 60)) throw new Error('Vul in hoeveel keer, tussen 2 en 60.');
+      const rep = isNew ? RES_REPEAT.find(x => x[0] === v.repeat) || RES_REPEAT[0] : RES_REPEAT[0], dur = rep[0] === 'once' ? 'once' : v.dur || 'forever';
+      if (dur === 'forever') { // a series: its reservations are made ahead and keep coming
+        const sid = uid('s').replace(/^s-/, ''), sr = { id: sid, name: v.name, amount: base.amount, type: v.type, note: v.note || '', rep: rep[0], start: v.date, until: null, skip: [] };
+        const occ = resSeriesDates(sr, resHorizon()).map(d => ({ col: 'reservations', id: resSeriesId(sid, d), data: { ...base, date: d, deadline: d, series: sid, paid: d === v.date ? base.paid : 0, status: d === v.date ? base.status : (base.status === 'Betaald' ? 'Gereserveerd' : base.status) } }));
+        return commit(`${v.name}: ${rep[1].toLowerCase()}, doorlopend`, [{ col: 'config', id: 'main', data: { ...C(), resSeries: [...resSeries(), sr] } }, ...occ]); }
+      let n = dur === 'once' ? 1 : Math.round(+v.times || 0);
+      if (dur === 'until') { if (!v.until || v.until < v.date) throw new Error('Kies een einddatum na de eerste datum.'); n = 0; while (n < 120 && resRepeatDate(v.date, rep, n) <= v.until) n++; }
+      if (dur === 'times' && !(n >= 2 && n <= 60)) throw new Error('Vul in hoeveel keer, tussen 2 en 60.');
       if (n === 1) return put('reservations', base, isNew ? `${v.name} toegevoegd` : `${v.name} opgeslagen`);
       await commit(`${v.name} ${n}× toegevoegd`, Array.from({ length: n }, (_, i) => ({ col: 'reservations', id: uid('res'), data: { ...base, date: resRepeatDate(v.date, rep, i), deadline: resRepeatDate(v.date, rep, i), note: (v.note ? v.note + ' · ' : '') + `${i + 1} van ${n}`, paid: i === 0 ? base.paid : 0, status: i === 0 ? base.status : (base.status === 'Betaald' ? 'Gereserveerd' : base.status) } })));
     },
@@ -4097,7 +4120,7 @@ function groceryCalEvents(r, start, to) { return null; }
 /* calendar: the Fridays after this period (their reservations are made when that period starts) */
 function groceryCalFuture(start, to) {
   if (!groceryWeekOn()) return []; const g = groceryPot(), from = addDays(periodOf(today()).end, 1), out = [];
-  for (let d = g.anchor; d <= to; d = addDays(d, 7)) if (d >= from && d >= start && !S.reservations.get(groceryWeekResId(d))) out.push({ date: d, amount: r2(+g.week) });
+  for (let d = g.anchor; d <= to; d = addDays(d, 7)) if (d >= from && d >= start && (!g.until || d <= g.until) && !S.reservations.get(groceryWeekResId(d))) out.push({ date: d, amount: r2(+g.week) });
   return out;
 }
 /* stand-alone, weekly: one reservation per week (id res-bood-w-<date>), "Betaald" once the transfer for that week is in */
@@ -4105,8 +4128,10 @@ const groceryWeekResId = d => 'res-bood-w-' + d;
 function groceryWeekOps(g) {
   const T = today(), p = periodOf(T), ops = [], seen = new Map();
   const put = (id, data) => { seen.set(id, data); const i = ops.findIndex(o => o.id === id && o.col === 'reservations'); if (i >= 0) ops[i].data = data; else ops.push({ col: 'reservations', id, data }); };
-  // the weeks from the first transfer up to the end of this period
-  const weeks = []; for (let d = g.anchor; d <= p.end; d = addDays(d, 7)) weeks.push(d);
+  // the weeks from the first transfer on: ahead up to three months after this one (so the coming months show them too),
+  // or up to the end date when one is set ("tot en met"); without an end date it keeps going ("doorlopend")
+  const endW = g.until && g.until < resHorizon() ? g.until : resHorizon();
+  const weeks = []; for (let d = g.anchor; d <= endW; d = addDays(d, 7)) weeks.push(d);
   // old reservations per period (and supermarket payments on them) go
   const oldIds = new Set(all('reservations').filter(r => r.grocery && !r.groceryWeek).map(r => r.id));
   oldIds.forEach(id => ops.push({ col: 'reservations', id, data: null }));
@@ -4202,6 +4227,7 @@ function groceryAuto() {
   if (GROC_BUSY || BOOT.state !== 'ready') return;
   const mig = groceryStartOps().length ? groceryStartOps() : groceryWeekMigrateOps();
   if (mig.length) { GROC_BUSY = true; commit('Boodschappen per week', mig, { log: false }).catch(e => console.warn(e)).finally(() => { GROC_BUSY = false; setTimeout(groceryAuto, 0); }); return; }
+  const sops = resSeriesOps(); if (sops.length) { GROC_BUSY = true; commit('Reeksen bijgewerkt', sops, { log: false }).catch(e => console.warn(e)).finally(() => { GROC_BUSY = false; setTimeout(groceryAuto, 0); }); return; }
   if (!groceryPot()) return;
   const ops = groceryPotOps(); if (!ops.length) return;
   GROC_BUSY = true; commit('Boodschappenpotje', ops, { log: false }).catch(e => console.warn(e)).finally(() => { GROC_BUSY = false; });
@@ -4238,11 +4264,13 @@ ACT.groceryEdit = () => {
   { const p = periodOf(today()), mode = +g.week > 0 ? 'week' : 'maand';
     return openSheet({ title: 'Boodschappen', body: `<div class="grid2">${F.select('mode', 'Hoe gaat het boodschappengeld?', mode, [['week', 'Een vast bedrag per week'], ['maand', 'Een bedrag per maand']], { cls: 'span2' })}
         ${F.money('week', 'Bedrag per week', g.week ?? 150, { ph: '150,00', when: 'mode=week' })}${F.date('anchor', 'Eerste keer overgemaakt op', g.anchor || dateIn(monthKey(p.start), payDay()), { when: 'mode=week' })}
+        ${F.select('dur', 'Hoe lang', g.until ? 'until' : 'forever', [['forever', 'Doorlopend (geen einde)'], ['until', 'Tot en met een datum']], { when: 'mode=week' })}${F.date('until', 'Tot en met', g.until || '', { when: 'dur=until' })}
         ${F.money('amount', 'Bedrag per maand', g.amount ?? null, { ph: '400,00', when: 'mode=maand' })}</div>
       <p class="small muted">Per week: het loopt elke 7 dagen door, los van de maand. Per periode (salaris tot salaris) telt de app hoeveel keer er wordt overgemaakt: 4 of 5 keer. Laat het bedrag leeg om het uit te zetten.</p>`,
       onSubmit: v => { const week = v.mode === 'week' && isFinite(v.week) && v.week > 0 ? r2(v.week) : null, amount = v.mode === 'maand' && isFinite(v.amount) && v.amount > 0 ? r2(v.amount) : null;
         if (!week && !amount) return commit('Boodschappen uit', [{ col: 'config', id: 'main', data: { ...C(), groceryPot: null } }, ...all('reservations').filter(r => r.grocery && r.date >= periodOf(today()).start && !activeTx().some(t => txResIds(t).includes(r.id))).map(r => ({ col: 'reservations', id: r.id, data: null }))]);
-        return saveConfig({ groceryPot: { amount: amount || r2(week * 52 / 12), week, anchor: week ? (v.anchor || today()) : null, from: g.from || (week ? v.anchor : null) || today() } }, 'Boodschappen ingesteld'); } }); }
+        const until = week && v.dur === 'until' ? v.until || null : null; if (week && v.dur === 'until' && !until) throw new Error('Kies tot en met welke datum.');
+        return saveConfig({ groceryPot: { amount: amount || r2(week * 52 / 12), week, anchor: week ? (v.anchor || today()) : null, from: g.from || (week ? v.anchor : null) || today(), until } }, 'Boodschappen ingesteld'); } }); }
   openSheet({ title: 'Boodschappenpotje', body: `<div class="grid2">${F.money('amount', 'Hoeveel wil je per maand aan boodschappen uitgeven?', g.amount ?? null, { ph: '400,00' })}</div>
       <p class="small muted">Betalingen bij supermarkten vanaf ${fmtLong(g.from || today())} krijgen de categorie Boodschappen en worden van het potje afgehaald. Laat leeg en sla op om het potje uit te zetten.</p>`,
     onSubmit: v => { const amount = isFinite(v.amount) && v.amount > 0 ? r2(v.amount) : null;
